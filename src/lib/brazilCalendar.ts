@@ -69,7 +69,7 @@ function isBrazilHoliday(date: Date): boolean {
   return brazilHolidaysOfYear(date.getFullYear()).has(dateKey(date));
 }
 
-function isBrazilBusinessDay(date: Date): boolean {
+export function isBrazilBusinessDay(date: Date): boolean {
   const dow = date.getDay();
   return dow !== 0 && dow !== 6 && !isBrazilHoliday(date);
 }

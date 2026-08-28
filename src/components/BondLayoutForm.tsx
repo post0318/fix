@@ -593,7 +593,8 @@ export function BondLayoutForm({
                 getRecentCouponDate(
                   value.maturityDate,
                   value.couponFrequency,
-                  getSettlementDate(value.trustContractDate) ?? undefined
+                  getSettlementDate(value.trustContractDate, value.calcBasis) ??
+                    undefined
                 ) ||
                 ""
               }

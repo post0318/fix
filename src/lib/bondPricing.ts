@@ -301,7 +301,7 @@ export function computeBondPricing(
     return null;
   }
 
-  const settlement = getSettlementDate(input.trustContractDate);
+  const settlement = getSettlementDate(input.trustContractDate, input.calcBasis);
   if (!settlement) return null;
 
   // 국내 원화채권은 액면 10,000원당, 브라질 국채(ANBIMA 관행)는 액면 1,000당,

@@ -1,4 +1,5 @@
-import { CouponFrequency } from "@/types/bondLayout";
+import { CalcBasis, CouponFrequency } from "@/types/bondLayout";
+import { isBrazilBusinessDay } from "@/lib/brazilCalendar";
 
 const TRUST_MATURITY_LEAD_DAYS = 11;
 
@@ -31,16 +32,28 @@ export function toDateString(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** 결제일 = 신탁계약일로부터 영업일(토/일 제외) n일 후 (WORKDAY, 공휴일 미반영) */
+/**
+ * 결제일 계산.
+ * - 브라질 국채(Business/252): SELIC 결제 관례대로 D+0. 신탁계약일이 브라질
+ *   영업일(토/일 + ANBIMA/B3 국경일 제외)이면 그날, 아니면 다음 영업일.
+ * - 그 외(한국/미국 등): 신탁계약일로부터 영업일(토/일 제외) 2일 후 (WORKDAY,
+ *   공휴일 미반영).
+ */
 export function getSettlementDate(
   trustContractDate: string,
-  businessDays = 2
+  calcBasis?: CalcBasis
 ): Date | null {
   const start = new Date(trustContractDate);
   if (Number.isNaN(start.getTime())) return null;
 
+  if (calcBasis === "Business/252") {
+    let date = start;
+    while (!isBrazilBusinessDay(date)) date = addDays(date, 1);
+    return date;
+  }
+
   let date = start;
-  let remaining = businessDays;
+  let remaining = 2;
   while (remaining > 0) {
     date = addDays(date, 1);
     const day = date.getDay();
