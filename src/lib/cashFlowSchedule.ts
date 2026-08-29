@@ -129,9 +129,14 @@ export function generateFixCashFlow(
     const availableBackFee = carryBackFeeResidual + backFeeThisPeriod;
     const totalDeduction = availableFrontFee + availableBackFee;
 
-    const taxBase = truncByCurrency(
-      taxableIncome > totalDeduction ? taxableIncome - totalDeduction : 0
-    );
+    // 완전 비과세(소득세·농특세 모두 없음)는 과세표준이 없다. 일반과세·
+    // 비과세(농특세)는 쿠폰이 과세(각각 소득세/농특세) 대상이라 공제를 뺀 값.
+    const isFullyExempt = input.taxStatus === "비과세";
+    const taxBase = isFullyExempt
+      ? 0
+      : truncByCurrency(
+          taxableIncome > totalDeduction ? taxableIncome - totalDeduction : 0
+        );
     const incomeTaxRate = getEffectiveIncomeTaxRate(input.taxStatus);
     const incomeTax = isKrw
       ? roundDown(taxBase * incomeTaxRate, -1)
@@ -156,19 +161,14 @@ export function generateFixCashFlow(
       netAmount,
     });
 
-    const remainingFrontFee =
-      taxableIncome < availableFrontFee
-        ? availableFrontFee - taxableIncome
-        : 0;
-    const remainingBackFee =
-      remainingFrontFee > 0
-        ? availableBackFee
-        : taxableIncome > totalDeduction
-          ? 0
-          : availableBackFee - (taxableIncome - availableFrontFee);
-
-    carryFrontFee = remainingFrontFee;
-    carryBackFeeResidual = remainingBackFee;
+    // 공제는 "실제 과세되는 소득"만큼만 소진된다. 완전 비과세면 소진 없음
+    // (선취보수가 첫 회차에 통째로 소각되던 문제). 일반과세·비과세(농특세)는
+    // 쿠폰이 과세대상이라 공제가 그만큼 소진된다.
+    const taxedThisPeriod = isFullyExempt ? 0 : taxableIncome;
+    const deductionUsed = Math.min(totalDeduction, taxedThisPeriod);
+    const frontUsed = Math.min(availableFrontFee, deductionUsed);
+    carryFrontFee = availableFrontFee - frontUsed;
+    carryBackFeeResidual = availableBackFee - (deductionUsed - frontUsed);
     periodStart = date;
   });
 
