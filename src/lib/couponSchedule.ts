@@ -18,13 +18,13 @@ export const FREQUENCY_PER_YEAR: Record<CouponFrequency, number> = {
 
 export function addMonths(date: Date, months: number): Date {
   const result = new Date(date);
-  result.setMonth(result.getMonth() + months);
+  result.setUTCMonth(result.getUTCMonth() + months);
   return result;
 }
 
 export function addDays(date: Date, days: number): Date {
   const result = new Date(date);
-  result.setDate(result.getDate() + days);
+  result.setUTCDate(result.getUTCDate() + days);
   return result;
 }
 
@@ -56,7 +56,7 @@ export function getSettlementDate(
   let remaining = 2;
   while (remaining > 0) {
     date = addDays(date, 1);
-    const day = date.getDay();
+    const day = date.getUTCDay();
     if (day !== 0 && day !== 6) remaining--;
   }
   return date;

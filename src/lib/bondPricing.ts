@@ -24,12 +24,12 @@ function actualDays(start: Date, end: Date): number {
 
 /** 30/360 (미국 NASD) 방식 일수 */
 function days360Us(start: Date, end: Date): number {
-  const y1 = start.getFullYear();
-  const m1 = start.getMonth() + 1;
-  let d1 = start.getDate();
-  const y2 = end.getFullYear();
-  const m2 = end.getMonth() + 1;
-  let d2 = end.getDate();
+  const y1 = start.getUTCFullYear();
+  const m1 = start.getUTCMonth() + 1;
+  let d1 = start.getUTCDate();
+  const y2 = end.getUTCFullYear();
+  const m2 = end.getUTCMonth() + 1;
+  let d2 = end.getUTCDate();
 
   if (d1 === 31) d1 = 30;
   if (d2 === 31 && d1 === 30) d2 = 30;
@@ -39,12 +39,12 @@ function days360Us(start: Date, end: Date): number {
 
 /** 30/360 (유럽) 방식 일수 */
 function days360Eu(start: Date, end: Date): number {
-  const y1 = start.getFullYear();
-  const m1 = start.getMonth() + 1;
-  const d1 = Math.min(start.getDate(), 30);
-  const y2 = end.getFullYear();
-  const m2 = end.getMonth() + 1;
-  const d2 = Math.min(end.getDate(), 30);
+  const y1 = start.getUTCFullYear();
+  const m1 = start.getUTCMonth() + 1;
+  const d1 = Math.min(start.getUTCDate(), 30);
+  const y2 = end.getUTCFullYear();
+  const m2 = end.getUTCMonth() + 1;
+  const d2 = Math.min(end.getUTCDate(), 30);
 
   return (y2 - y1) * 360 + (m2 - m1) * 30 + (d2 - d1);
 }
@@ -63,22 +63,22 @@ function yearFracActAct(start: Date, end: Date): number {
     sign = -1;
   }
 
-  const y1 = s.getFullYear();
-  const y2 = e.getFullYear();
+  const y1 = s.getUTCFullYear();
+  const y2 = e.getUTCFullYear();
 
   if (y1 === y2) {
     return (sign * actualDays(s, e)) / (isLeapYear(y1) ? 366 : 365);
   }
 
   let sum = 0;
-  const endOfY1 = new Date(y1, 11, 31);
+  const endOfY1 = new Date(Date.UTC(y1, 11, 31));
   sum += (actualDays(s, endOfY1) + 1) / (isLeapYear(y1) ? 366 : 365);
 
   for (let y = y1 + 1; y < y2; y++) {
     sum += 1;
   }
 
-  const startOfY2 = new Date(y2, 0, 1);
+  const startOfY2 = new Date(Date.UTC(y2, 0, 1));
   sum += actualDays(startOfY2, e) / (isLeapYear(y2) ? 366 : 365);
 
   return sign * sum;
@@ -111,6 +111,40 @@ export function roundDown(value: number, digits: number): number {
 export function roundUp(value: number, digits: number): number {
   const factor = Math.pow(10, digits);
   return (Math.sign(value) || 1) * Math.ceil(Math.abs(value) * factor) / factor;
+}
+
+/**
+ * 반기(등) 실효 표면이율 계수 [(1+연이율)^(1/periods) − 1].
+ * ANBIMA "Caderno de Fórmulas — NTN-F"대로 백분율 기준 소수 6자리 반올림한다
+ * (연 10% → 반기 4.880885% → per 1,000 face 48.80885). 블룸버그 실측과 대조 확인.
+ */
+export function anbimaCouponFactor(
+  annualRateDec: number,
+  periodsPerYear: number
+): number {
+  return (
+    Math.round((Math.pow(1 + annualRateDec, 1 / periodsPerYear) - 1) * 1e8) / 1e8
+  );
+}
+
+/** ANBIMA: 브라질 국채 PU는 소수 6자리 절사(truncamento). */
+export function truncPu(value: number): number {
+  return Math.trunc(value * 1e6) / 1e6;
+}
+
+/**
+ * 경과이자(juros decorridos). 브라질(Business/252)은 ANBIMA 관행대로 복리
+ * VN×((1+표면금리)^(경과영업일/252)−1), 그 외 관행은 표면금리×경과연수(단리).
+ */
+function accruedInterestFor(
+  notional: number,
+  couponRateDec: number,
+  accrualFrac: number,
+  isBrazil: boolean
+): number {
+  return isBrazil
+    ? notional * (Math.pow(1 + couponRateDec, accrualFrac) - 1)
+    : notional * couponRateDec * accrualFrac;
 }
 
 /**
@@ -238,7 +272,7 @@ export function computeBrazilDirtyPrice(
   if (settlement >= maturity) return null;
 
   const f = FREQUENCY_PER_YEAR[frequency];
-  const coupon = redemption * (Math.pow(1 + annualRate, 1 / f) - 1);
+  const coupon = redemption * anbimaCouponFactor(annualRate, f);
   const dates = brazilCouponDates(settlement, maturity, frequency);
   if (dates.length === 0) return null;
 
@@ -330,8 +364,10 @@ export function computeBondPricing(
       input.couponFrequency
     );
     if (dirtyRaw === null) return null;
-    dirtyPrice = roundUp(dirtyRaw, 4);
-    cleanPrice = roundUp(dirtyPrice - redemptionBasis * (rate / 100) * accrualFrac, 4);
+    dirtyPrice = truncPu(dirtyRaw);
+    cleanPrice = truncPu(
+      dirtyPrice - accruedInterestFor(redemptionBasis, rate / 100, accrualFrac, true)
+    );
   } else {
     const cleanRaw = computeCleanPrice(
       settlement,
@@ -344,7 +380,7 @@ export function computeBondPricing(
     if (cleanRaw === null) return null;
     cleanPrice = roundUp(cleanRaw, 4);
     dirtyPrice = roundUp(
-      cleanPrice + redemptionBasis * (rate / 100) * accrualFrac,
+      cleanPrice + accruedInterestFor(redemptionBasis, rate / 100, accrualFrac, false),
       4
     );
   }
@@ -361,7 +397,12 @@ export function computeBondPricing(
     -3
   );
 
-  const accruedInterest = faceValue * (rate / 100) * accrualFrac;
+  const accruedInterest = accruedInterestFor(
+    faceValue,
+    rate / 100,
+    accrualFrac,
+    isBrazil
+  );
   const settlementAmountRaw = (faceValue * dirtyPrice) / redemptionBasis * fxRate;
   // 화면에 보이는 결제금액(수탁통화 KRW는 정수 절사, 그 외는 소수점 2자리
   // 절사)과 실제로 현금잔액 계산에 쓰는 값이 달라서

@@ -124,6 +124,8 @@ export function parseBondFile(buffer: ArrayBuffer): Partial<BondLayoutInput> {
   const workbook = XLSX.read(buffer, { type: "array" });
   const result: Partial<BondLayoutInput> = {};
   const found = new Set<UploadableField>();
+  // 표면이율 raw 값. 단위 정규화(퍼센트 vs 소수) 판별자로 쓴다.
+  let couponRateRaw: number | null = null;
 
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
@@ -159,13 +161,14 @@ export function parseBondFile(buffer: ArrayBuffer): Partial<BondLayoutInput> {
         } else if (field === "couponRate") {
           const raw = Number(valueCell.v);
           if (!Number.isNaN(raw)) {
-            result.couponRate = String(Math.round(raw * 100) / 100);
+            couponRateRaw = raw;
+            result.couponRate = String(raw); // 정규화는 루프 후 일괄
             found.add(field);
           }
         } else if (field === "frontFeeRate" || field === "backFeeRate") {
           const raw = Number(valueCell.v);
           if (!Number.isNaN(raw)) {
-            result[field] = raw.toFixed(2);
+            result[field] = String(raw); // 정규화는 루프 후 일괄
             found.add(field);
           }
         } else if (field === "couponFrequency") {
@@ -222,6 +225,29 @@ export function parseBondFile(buffer: ArrayBuffer): Partial<BondLayoutInput> {
         }
       }
     }
+  }
+
+  // 표면이율·보수율 단위 정규화. fix.xlsx·top_lay.xlsx·입력레이아웃.xlsx 등
+  // 레포 동봉 레이아웃 파일은 이 값들을 소수(0.0795)로, up.xlsx·샘플.xlsx 등
+  // 정상 업로드 포맷은 퍼센트(7.95)로 저장한다. 표면이율은 이 상품군에서 항상
+  // 1% 이상이므로 raw가 1 미만이면 파일 전체가 소수 표기로 보고 세 값을 ×100
+  // 한다. (보수율은 0.5%처럼 1 미만이 정상이라 단독 판별 불가 → 표면이율을
+  // 파일 단위 판별자로 쓴다.)
+  const fractional =
+    couponRateRaw != null && couponRateRaw > 0 && couponRateRaw < 1;
+  const scale = fractional ? 100 : 1;
+  if (result.couponRate != null) {
+    const n = Number(result.couponRate);
+    result.couponRate = Number.isNaN(n)
+      ? undefined
+      : String(Math.round(n * scale * 100) / 100);
+  }
+  for (const f of ["frontFeeRate", "backFeeRate"] as const) {
+    if (result[f] == null) continue;
+    const n = Number(result[f]);
+    result[f] = Number.isNaN(n)
+      ? undefined
+      : (Math.round(n * scale * 100) / 100).toFixed(2);
   }
 
   return result;
