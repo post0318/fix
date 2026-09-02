@@ -334,28 +334,17 @@ export function BondLayoutForm({
 
   const maturitySummary = useMemo(
     () =>
-      pricing && cashFlowRows
-        ? computeMaturitySummary(pricing, cashFlowRows, {
+      cashFlowRows
+        ? computeMaturitySummary(cashFlowRows, {
             trustContractDate: value.trustContractDate,
             maturityDate: value.maturityDate,
-            trustInvestmentAmount: value.trustInvestmentAmount,
-            backFeeRate: value.backFeeRate,
-            tradeCurrency: value.tradeCurrency,
-            custodyCurrency: value.custodyCurrency,
-            maturityFxRate: value.maturityFxRate,
             comprehensiveTaxRate: value.incomeTaxRate,
           })
         : null,
     [
-      pricing,
       cashFlowRows,
       value.trustContractDate,
       value.maturityDate,
-      value.trustInvestmentAmount,
-      value.backFeeRate,
-      value.tradeCurrency,
-      value.custodyCurrency,
-      value.maturityFxRate,
       value.incomeTaxRate,
     ]
   );
@@ -1001,11 +990,11 @@ export function BondLayoutForm({
               }
             />
           </Row>
-          <Row label="만기시 세전금액">
+          <Row label="지급이자총액">
             {maturitySummary ? (
               <span className="text-sm text-zinc-900 dark:text-zinc-100">
                 {formatSettlementAmount(
-                  maturitySummary.preTaxMaturityAmount,
+                  maturitySummary.totalInterestPaid,
                   value.custodyCurrency === "KRW"
                 )}
               </span>
@@ -1013,10 +1002,13 @@ export function BondLayoutForm({
               <ComputedValue />
             )}
           </Row>
-          <Row label="마지막 후취보수">
+          <Row label="만기시 세전금액">
             {maturitySummary ? (
               <span className="text-sm text-zinc-900 dark:text-zinc-100">
-                {formatAmount(maturitySummary.lastBackFee)}
+                {formatSettlementAmount(
+                  maturitySummary.preTaxMaturityAmount,
+                  value.custodyCurrency === "KRW"
+                )}
               </span>
             ) : (
               <ComputedValue />

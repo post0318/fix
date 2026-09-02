@@ -55,6 +55,15 @@ export function CashFlowTable({ rows, custodyCurrency }: CashFlowTableProps) {
     }
   );
 
+  const colWidth = `${(100 / columns.length).toFixed(4)}%`;
+  const renderColgroup = () => (
+    <colgroup>
+      {columns.map((col) => (
+        <col key={col} style={{ width: colWidth }} />
+      ))}
+    </colgroup>
+  );
+
   const isTruncated = data.length > MAX_VISIBLE_ROWS;
   const headRows = isTruncated ? data.slice(0, HEAD_ROWS) : data;
   const tailRows = isTruncated ? data.slice(data.length - TAIL_ROWS) : [];
@@ -109,7 +118,8 @@ export function CashFlowTable({ rows, custodyCurrency }: CashFlowTableProps) {
         <>
           {/* 화면: 전체 행 표시 */}
           <div className="overflow-x-auto print:hidden">
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="w-full min-w-[900px] table-fixed text-sm">
+              {renderColgroup()}
               <thead>
                 <tr className="border-b border-zinc-200 bg-zinc-100 text-left text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
                   {columns.map((col, i) => (
@@ -158,7 +168,8 @@ export function CashFlowTable({ rows, custodyCurrency }: CashFlowTableProps) {
 
           {/* 인쇄: 앞/뒤 일부만 표시하고 중간은 생략 */}
           <div className="hidden overflow-x-auto print:block">
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="w-full min-w-[900px] table-fixed text-sm">
+              {renderColgroup()}
               <thead>
                 <tr className="border-b border-zinc-200 bg-zinc-100 text-left text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
                   {columns.map((col, i) => (
