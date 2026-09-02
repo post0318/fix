@@ -166,10 +166,13 @@ function accruedInterestFor(
  * 채권 매수단가(clean, per `redemption` face — 국내 원화채권은 10,000, 그 외는
  * 국제 관행대로 100).
  *
- * `actualDayCount=false`(기본): fix.xlsx의 `PRICE(...)` 호출대로 미국 30/360으로
- * 이표기간 분율(E·DSC·A)을 계산한다.
- * `actualDayCount=true`(ACT/ACT): 이표기간 분율을 실제일수로 계산한다 —
- * ICMA(ISMA) 관행이자 엑셀 `PRICE(...,1)` 의 내부 계산 기준.
+ * 이표기간 분율(E·DSC·A)을 `basis`(BASIS_INDEX 값)에 맞춰 엑셀 `PRICE(…, basis)`
+ * 와 동일하게 산정한다:
+ *  - 0 미국 30/360 : E·DSC·A 모두 30/360 US
+ *  - 4 유럽 30/360 : E·DSC·A 모두 30E/360
+ *  - 1 ACT/ACT     : E·DSC·A 모두 실제일수 (ICMA/ISMA)
+ *  - 2 ACT/360     : E = 360/f, DSC·A = 실제일수
+ *  - 3 ACT/365     : E = 365/f, DSC·A = 실제일수
  */
 export function computeCleanPrice(
   settlement: Date,
@@ -178,7 +181,7 @@ export function computeCleanPrice(
   annualYield: number,
   redemption: number,
   frequency: CouponFrequency,
-  actualDayCount = false
+  basis = 0
 ): number | null {
   if (settlement >= maturity) return null;
 
@@ -186,10 +189,26 @@ export function computeCleanPrice(
   const { previousCouponDate, nextCouponDate, periodsRemaining } =
     getCouponPeriod(maturity, frequency, settlement);
 
-  const dc = actualDayCount ? actualDays : days360Us;
-  const e = dc(previousCouponDate, nextCouponDate);
-  const dsc = dc(settlement, nextCouponDate);
-  const a = dc(previousCouponDate, settlement);
+  let e: number;
+  let dsc: number;
+  let a: number;
+  if (basis === 4) {
+    e = days360Eu(previousCouponDate, nextCouponDate);
+    dsc = days360Eu(settlement, nextCouponDate);
+    a = days360Eu(previousCouponDate, settlement);
+  } else if (basis === 1) {
+    e = actualDays(previousCouponDate, nextCouponDate);
+    dsc = actualDays(settlement, nextCouponDate);
+    a = actualDays(previousCouponDate, settlement);
+  } else if (basis === 2 || basis === 3) {
+    e = (basis === 3 ? 365 : 360) / f;
+    dsc = actualDays(settlement, nextCouponDate);
+    a = actualDays(previousCouponDate, settlement);
+  } else {
+    e = days360Us(previousCouponDate, nextCouponDate);
+    dsc = days360Us(settlement, nextCouponDate);
+    a = days360Us(previousCouponDate, settlement);
+  }
   if (e === 0) return null;
 
   const coupon = (redemption * annualRate) / f;
@@ -370,15 +389,16 @@ export function computeBondPricing(
     : period.previousCouponDate;
 
   const basis = BASIS_INDEX[input.calcBasis];
-  const isActAct = input.calcBasis === "ACT/ACT";
-  // ACT/ACT는 ICMA(ISMA) 관행으로 일원화 — 경과분율 = (직전이표일→결제일 실제
-  // 일수) ÷ (그 이표기간 실제일수) ÷ 연간지급횟수. 엑셀 PRICE(...,1)의 내부 할인·
-  // 경과 계산과 같은 기준이라 YEARFRAC(...,1)(ISDA 연도분할)보다 정합적이다.
-  const accrualFrac = isActAct
-    ? actualDays(period.previousCouponDate, settlement) /
-      actualDays(period.previousCouponDate, period.nextCouponDate) /
-      FREQUENCY_PER_YEAR[input.couponFrequency]
-    : yearFrac(recentCoupon, settlement, basis);
+  // 경과분율은 basis별로 computeCleanPrice의 내부 경과분(coupon·a/e)과 같은
+  // 기준이라야 clean+경과=dirty 검산이 맞는다. ACT/ACT만 ICMA(쿠폰기간 분율 ÷
+  // 지급횟수)로 별도 계산 — YEARFRAC(...,1)(ISDA 연도분할)은 엑셀 PRICE(...,1)과
+  // 어긋난다. 나머지(30/360 US·EU, ACT/360, ACT/365)는 yearFrac이 이미 맞다.
+  const accrualFrac =
+    basis === 1
+      ? actualDays(period.previousCouponDate, settlement) /
+        actualDays(period.previousCouponDate, period.nextCouponDate) /
+        FREQUENCY_PER_YEAR[input.couponFrequency]
+      : yearFrac(recentCoupon, settlement, basis);
 
   let cleanPrice: number;
   let dirtyPrice: number;
@@ -405,7 +425,7 @@ export function computeBondPricing(
       yld / 100,
       redemptionBasis,
       input.couponFrequency,
-      isActAct
+      basis
     );
     if (cleanRaw === null) return null;
     cleanPrice = roundUp(cleanRaw, 4);
