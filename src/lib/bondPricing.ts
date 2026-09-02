@@ -282,11 +282,13 @@ function brazilCouponDates(
   frequency: CouponFrequency
 ): Date[] {
   const months = FREQUENCY_MONTHS[frequency];
-  const dates: Date[] = [];
-  let cursor = maturity;
-  while (cursor > settlement) {
-    dates.unshift(cursor);
-    cursor = addMonths(cursor, -months);
+  // 이표일은 만기일 기준 months×k 개월(월말성 유지 — 연쇄 계산은 2월에서
+  // 월말성이 깨진다). settlement 이후 만기일까지.
+  const dates: Date[] = [maturity];
+  for (let k = 1; ; k++) {
+    const d = addMonths(maturity, -months * k);
+    if (d <= settlement) break;
+    dates.unshift(d);
   }
   return dates;
 }

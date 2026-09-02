@@ -17,9 +17,19 @@ export const FREQUENCY_PER_YEAR: Record<CouponFrequency, number> = {
 };
 
 export function addMonths(date: Date, months: number): Date {
-  const result = new Date(date);
-  result.setUTCMonth(result.getUTCMonth() + months);
-  return result;
+  const d = date.getUTCDate();
+  // 목표 월의 1일로 옮긴 뒤, 그 달 마지막 날을 넘지 않게 clamp 한다.
+  // (예: 8/31 − 6개월 → 2/31 이 setUTCMonth로는 3/3 으로 넘어가던 것 → 2/28.)
+  // 원래 날짜가 월말이면 min(day, 목표월 마지막날)로 결과도 자동 월말이 된다 —
+  // 월말 만기 채권(미국 국채 등)의 이표일이 월말에 고정된다.
+  const target = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1)
+  );
+  const lastDay = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)
+  ).getUTCDate();
+  target.setUTCDate(Math.min(d, lastDay));
+  return target;
 }
 
 export function addDays(date: Date, days: number): Date {
@@ -69,22 +79,27 @@ export interface CouponPeriod {
   periodsRemaining: number;
 }
 
-/** 만기일을 기준으로 이자지급주기만큼씩 거슬러 올라가, 기준일이 속한 이표기간(직전/차기 이표일)을 찾는다 */
+/**
+ * 만기일 기준으로 이자지급주기만큼씩 거슬러 올라가, 기준일이 속한 이표기간
+ * (직전/차기 이표일)을 찾는다.
+ *
+ * 이표일은 항상 **만기일에서 months×k 개월** 뺀 날로 계산한다(연쇄로 이전
+ * 결과에서 다시 빼면 2월을 지나며 월말성이 소실된다 — 8/31→2/28→8/28...).
+ */
 export function getCouponPeriod(
   maturity: Date,
   frequency: CouponFrequency,
   referenceDate: Date
 ): CouponPeriod {
   const months = FREQUENCY_MONTHS[frequency];
-  let nextCouponDate = maturity;
-  let previousCouponDate = addMonths(nextCouponDate, -months);
-  let periodsRemaining = 1;
-
+  let k = 1;
+  let previousCouponDate = addMonths(maturity, -months * k);
   while (previousCouponDate > referenceDate) {
-    nextCouponDate = previousCouponDate;
-    previousCouponDate = addMonths(nextCouponDate, -months);
-    periodsRemaining++;
+    k++;
+    previousCouponDate = addMonths(maturity, -months * k);
   }
+  const nextCouponDate = addMonths(maturity, -months * (k - 1));
+  const periodsRemaining = k;
 
   return { previousCouponDate, nextCouponDate, periodsRemaining };
 }
@@ -143,14 +158,16 @@ export function generateCouponSchedule(
   }
 
   const months = FREQUENCY_MONTHS[frequency];
-  const dates: string[] = [];
-  let next = addMonths(issue, months);
-
-  while (next < maturity) {
-    dates.push(toDateString(next));
-    next = addMonths(next, months);
+  // 이표일은 만기일 기준으로 months×k 개월씩 뺀 날(월말성 유지). 발행일 이후
+  // ~ 만기일 이전 구간만. 마지막 행은 신탁만기일(만기+11일).
+  const coupons: Date[] = [];
+  for (let k = 1; ; k++) {
+    const d = addMonths(maturity, -months * k);
+    if (d <= issue) break;
+    coupons.unshift(d);
   }
 
+  const dates = coupons.map(toDateString);
   dates.push(toDateString(addDays(maturity, TRUST_MATURITY_LEAD_DAYS)));
 
   return dates;
