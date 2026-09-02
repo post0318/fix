@@ -22,7 +22,19 @@ function actualDays(start: Date, end: Date): number {
   return Math.round((end.getTime() - start.getTime()) / MS_PER_DAY);
 }
 
-/** 30/360 (미국 NASD) 방식 일수 */
+/** 그 해·그 달 기준 2월 말일(윤년 29·평년 28)인가 */
+function isLastDayOfFeb(year: number, month: number, day: number): boolean {
+  return month === 2 && day === (isLeapYear(year) ? 29 : 28);
+}
+
+/**
+ * 30/360 (미국 NASD/SIA) 방식 일수. 엑셀 `YEARFRAC(…,0)`·`PRICE`와 동일한
+ * 순서로 보정한다:
+ *  ① D1·D2 모두 2월 말일이면 D2 = 30
+ *  ② D1이 2월 말일이면 D1 = 30
+ *  ③ D1 = 31이면 D1 = 30
+ *  ④ D2 = 31이고 (보정 후) D1 = 30이면 D2 = 30
+ */
 function days360Us(start: Date, end: Date): number {
   const y1 = start.getUTCFullYear();
   const m1 = start.getUTCMonth() + 1;
@@ -31,6 +43,9 @@ function days360Us(start: Date, end: Date): number {
   const m2 = end.getUTCMonth() + 1;
   let d2 = end.getUTCDate();
 
+  const d1IsFebEnd = isLastDayOfFeb(y1, m1, d1);
+  if (d1IsFebEnd && isLastDayOfFeb(y2, m2, d2)) d2 = 30;
+  if (d1IsFebEnd) d1 = 30;
   if (d1 === 31) d1 = 30;
   if (d2 === 31 && d1 === 30) d2 = 30;
 
