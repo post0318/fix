@@ -32,7 +32,6 @@ import { encodeBondLink } from "@/lib/bondLink";
 import { BondSearchBox } from "@/components/BondSearchBox";
 import { UsBondSearchBox } from "@/components/UsBondSearchBox";
 import { KoreaBondSearchBox } from "@/components/KoreaBondSearchBox";
-import { BrazilBondSearchBox } from "@/components/BrazilBondSearchBox";
 
 function formatAmount(n: number): string {
   return n.toLocaleString("ko-KR", {
@@ -110,13 +109,14 @@ interface BondLayoutFormProps {
   lockToggleDisabled?: boolean;
 }
 
+// Business/252(브라질 ANBIMA)는 채권세상에서 제외한다. 필요 시 프로젝트 4
+// 로직으로 다시 반영.
 const CALC_BASIS_OPTIONS: CalcBasis[] = [
   "미국 30/360",
   "ACT/ACT",
   "ACT/360",
   "ACT/365",
   "유럽 30/360",
-  "Business/252",
 ];
 
 const INVESTOR_TYPE_OPTIONS: InvestorType[] = ["개인", "일반법인", "금융법인"];
@@ -247,7 +247,7 @@ export function BondLayoutForm({
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [linkStatus, setLinkStatus] = useState<string | null>(null);
   const [activeSearchBox, setActiveSearchBox] = useState<
-    "general" | "us" | "kr" | "br" | null
+    "general" | "us" | "kr" | null
   >(null);
   // 신용등급이 SEC 공시서류(FWP) 기준 값인지(미국채권검색의 회사채만
   // 해당) 표시해 라벨을 "신용등급(공시기준)"으로 바꾸는 데 쓴다. 다른
@@ -431,16 +431,6 @@ export function BondLayoutForm({
           active={activeSearchBox === "kr"}
           onApply={(fields) => {
             setActiveSearchBox("kr");
-            onLockedChange(false);
-            setDisclosureRating(false);
-            onChange((prev) => applyFieldsWithCurrencySync(prev, fields));
-          }}
-        />
-        <BrazilBondSearchBox
-          disabled={lockToggleDisabled}
-          active={activeSearchBox === "br"}
-          onApply={(fields) => {
-            setActiveSearchBox("br");
             onLockedChange(false);
             setDisclosureRating(false);
             onChange((prev) => applyFieldsWithCurrencySync(prev, fields));
@@ -851,11 +841,7 @@ export function BondLayoutForm({
           </Row>
           <Row
             label={
-              value.tradeCurrency === "KRW"
-                ? "경과이자"
-                : value.calcBasis === "Business/252"
-                  ? "경과이자(1000BRL)"
-                  : "경과이자(100$)"
+              value.tradeCurrency === "KRW" ? "경과이자" : "경과이자(100$)"
             }
           >
             {pricing ? (

@@ -50,7 +50,6 @@ const CALC_BASIS_VALUES: CalcBasis[] = [
   "ACT/360",
   "ACT/365",
   "유럽 30/360",
-  "Business/252",
 ];
 
 const TAX_STATUS_VALUES: TaxStatus[] = ["일반과세", "비과세(농특세)", "비과세"];
