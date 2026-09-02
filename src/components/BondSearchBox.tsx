@@ -210,7 +210,7 @@ export function BondSearchBox({ disabled, active, onApply }: BondSearchBoxProps)
           yieldParts.length === 0 &&
           typeof data.lastPriceYield === "number"
         ) {
-          yieldParts.push(`최종가 ${data.lastPriceYield}%`);
+          yieldParts.push(`최종가 ${data.lastPriceYield}% (추정)`);
         }
         setQuoteInfo(yieldParts.length > 0 ? yieldParts.join(" · ") : "수익률 정보 없음");
         // 이 API는 신용등급을 제공하지 않는다. 이전 종목 선택 때 값이 남아있지

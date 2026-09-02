@@ -12,6 +12,8 @@ export async function GET(request: NextRequest) {
   const isin = request.nextUrl.searchParams.get("isin");
   const couponRate = Number(request.nextUrl.searchParams.get("couponRate"));
   const maturityDate = request.nextUrl.searchParams.get("maturityDate");
+  const freqRaw = Number(request.nextUrl.searchParams.get("freqMonths"));
+  const freqMonths = [3, 6, 12].includes(freqRaw) ? freqRaw : null;
   if (!isin || !maturityDate || Number.isNaN(couponRate)) {
     return NextResponse.json(
       { error: "isin/couponRate/maturityDate 파라미터가 필요합니다." },
@@ -19,7 +21,12 @@ export async function GET(request: NextRequest) {
     );
   }
   try {
-    const rate = await getYieldEstimateByIsin(isin, couponRate, maturityDate);
+    const rate = await getYieldEstimateByIsin(
+      isin,
+      couponRate,
+      maturityDate,
+      freqMonths
+    );
     return NextResponse.json({ rate });
   } catch (error) {
     return NextResponse.json(

@@ -379,11 +379,18 @@ export function UsBondSearchBox({ disabled, active, onApply }: UsBondSearchBoxPr
         couponRate: String(tranche.couponRate),
         maturityDate: tranche.maturityDate,
       });
+      if (tranche.couponFrequencyMonths != null)
+        params.set("freqMonths", String(tranche.couponFrequencyMonths));
       fetch(`/api/us-bond-yield?${params}`)
         .then((res) => res.json())
         .then((data: { rate?: number | null }) => {
           if (typeof data.rate === "number") {
             onApply({ purchaseYield: String(data.rate) });
+            setStatus(
+              baseStatus === "OK"
+                ? "매수금리는 현재가 기준 추정치입니다 — 체결 전 확인 바랍니다."
+                : `${baseStatus} 매수금리는 현재가 기준 추정치입니다.`
+            );
           } else {
             notifyYieldMissing();
           }

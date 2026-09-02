@@ -237,10 +237,13 @@ export function computeCleanPrice(
 /**
  * computeCleanPrice의 역산(가격→수익률). 가격은 수익률에 대해 단조감소이므로
  * 이분탐색으로 목표가(clean price)에 대응하는 연수익률을 찾는다. 종목검색
- * (Frankfurt) 상세조회에서 lastPrice만 주고 수익률은 안 줄 때, 이 앱의
- * 기본 날짜계산기준(미국 30/360 — computeCleanPrice 자체가 이 기준 고정)과
- * 기본 이자지급주기(6개월)를 가정해 근사 수익률을 구하는 용도. 실제 채권의
- * 날짜계산기준/주기가 다르면 오차가 있을 수 있는 추정치다.
+ * (Frankfurt) 상세조회에서 lastPrice만 주고 수익률은 안 줄 때 쓴다.
+ *
+ * 날짜계산기준은 미국 30/360으로 가정한다 — `computeCleanPrice`는 basis
+ * 인자를 받지만 여기선 넘기지 않는다(호출부가 Frankfurt에서 실제 basis를
+ * 확인할 수 없어서). 미국채(ACT/ACT)는 이 가정으로 인한 오차가 ≤0.02bp로
+ * 무시할 수준. 이자지급주기는 호출부가 알면 그 값(frequency), 모르면 6개월을
+ * 넘긴다. 실무상 추정치이며 화면에도 그렇게 표시된다.
  */
 export function impliedYieldFromPrice(
   settlement: Date,

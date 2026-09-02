@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { getRedis } from "@/lib/server/redis";
 import { impliedYieldFromPrice } from "@/lib/bondPricing";
+import type { CouponFrequency } from "@/types/bondLayout";
 
 // boerse-frankfurt.de가 live.deutsche-boerse.com으로 리브랜딩/이전되면서 옛
 // 도메인은 리다이렉트만 거쳐가는데(약 2~3초 추가 소요), 홈페이지+메인 JS
@@ -398,21 +399,25 @@ async function getLastPrice(
   return { price, asOf };
 }
 
+function frequencyFromMonths(m: number | null | undefined): CouponFrequency {
+  return m === 3 ? "3개월" : m === 12 ? "12개월" : "6개월";
+}
+
 /**
- * ISIN+MIC로 현재가를 조회해 매수/만기수익률을 추정한다. boerse-frankfurt
- * API는 가격(lastPrice)만 주고 수익률/날짜계산기준/이자지급주기는 안 줘서
- * (실제 확인: master_data_bond의 interestPaymentPeriod가 여러 종목에서
- * 계속 null), 채권세상 자체의 기본 날짜계산기준(미국 30/360 —
- * bondPricing.ts의 computeCleanPrice가 애초에 이 기준 고정)과 기본
- * 이자지급주기(6개월)를 가정해 impliedYieldFromPrice로 역산한다. 실제
- * 종목의 기준이 다르면 오차가 있을 수 있는 추정치다. bidYield/askYield는
- * 이 API에 대응하는 데이터가 없어 항상 null이다.
+ * ISIN+MIC로 현재가를 조회해 만기수익률을 추정한다. boerse-frankfurt API는
+ * 가격(lastPrice, %표시 clean)만 주고 수익률·날짜계산기준은 안 준다. 날짜계산
+ * 기준은 확인할 방법이 없어 미국 30/360으로 가정하고(`impliedYieldFromPrice`가
+ * basis 인자를 넘기지 않는다), 이자지급주기는 알 수 있으면(`freqMonths`) 그 값,
+ * 없으면 6개월로 가정해 `impliedYieldFromPrice`로 역산한다. 실제 기준이 다르면
+ * 오차가 있는 추정치다. 결과가 −5%~+50% 밖이면(단위표시 호가·파싱 오류 등)
+ * null. bidYield/askYield는 대응 데이터가 없어 항상 null이다.
  */
 export async function getBondQuote(
   isin: string,
   mic: string,
   couponRate: number | null,
-  maturityDate: string | null
+  maturityDate: string | null,
+  freqMonths?: number | null
 ): Promise<BondQuote> {
   const result: BondQuote = { bidYield: null, askYield: null, lastPriceYield: null };
 
@@ -427,9 +432,11 @@ export async function getBondQuote(
     couponRate / 100,
     last.price,
     100,
-    "6개월"
+    frequencyFromMonths(freqMonths)
   );
-  if (yieldEstimate !== null) {
+  // sanity: 역산 결과가 상식 범위 밖이면(예: 가격이 단위표시라 100 기준이 아닐 때
+  // -20% 같은 값이 나온다) 추정치로 쓰지 않는다.
+  if (yieldEstimate !== null && yieldEstimate > -0.05 && yieldEstimate < 0.5) {
     result.lastPriceYield = Math.round(yieldEstimate * 100000) / 1000;
   }
 
@@ -448,7 +455,8 @@ export async function getBondQuote(
 export async function getYieldEstimateByIsin(
   isin: string,
   couponRate: number,
-  maturityDate: string
+  maturityDate: string,
+  freqMonths?: number | null
 ): Promise<number | null> {
   const info = await dataRequest("instrument_information", { isin });
   const mics = info?.mics;
@@ -457,7 +465,7 @@ export async function getYieldEstimateByIsin(
     (Array.isArray(mics) && typeof mics[0] === "string" ? mics[0] : undefined);
   if (!mic) return null;
 
-  const quote = await getBondQuote(isin, mic, couponRate, maturityDate);
+  const quote = await getBondQuote(isin, mic, couponRate, maturityDate, freqMonths);
   return quote.lastPriceYield;
 }
 
@@ -474,19 +482,27 @@ export async function getBondDetail(isin: string): Promise<BondDetail> {
   const couponRate = typeof master?.cupon === "number" ? master.cupon : null;
   const maturityDate = typeof master?.maturity === "string" ? master.maturity : null;
 
-  // 현재가 조회는 부가 정보라, 실패해도 나머지(발행일/만기일 등) 조회는
-  // 살린다. price_information이 SSE 스트림이라는 걸 확인해 4초 안에 첫
-  // 이벤트만 읽고 빠져나오도록 고쳐서 더 이상 상세조회 전체가 멈추지는
-  // 않는다(getBondQuote 주석 참고). lastPriceYield는 기본 날짜계산기준/
-  // 이자지급주기 가정에 기반한 추정치다.
-  const quote = await getBondQuote(isin, mic, couponRate, maturityDate).catch((err) => {
-    console.warn(`[boerseFrankfurt] price_information(${isin}) 조회 실패:`, err);
-    return { bidYield: null, askYield: null, lastPriceYield: null } as BondQuote;
-  });
-
   const issueDate = typeof master?.issueDate === "string" ? master.issueDate : null;
   const firstAnnualPayDate =
     typeof master?.firstAnnualPayDate === "string" ? master.firstAnnualPayDate : null;
+  // master로 실제 지급주기를 알 수 있으면 역산에 그 값을 쓴다(6개월 하드코딩 대신).
+  const freqMonths = frequencyFromFirstPayGap(issueDate, firstAnnualPayDate);
+
+  // 현재가 조회는 부가 정보라, 실패해도 나머지(발행일/만기일 등) 조회는
+  // 살린다. price_information이 SSE 스트림이라는 걸 확인해 4초 안에 첫
+  // 이벤트만 읽고 빠져나오도록 고쳐서 더 이상 상세조회 전체가 멈추지는
+  // 않는다(getBondQuote 주석 참고). lastPriceYield는 날짜계산기준(30/360 가정)
+  // 에 기반한 추정치다.
+  const quote = await getBondQuote(
+    isin,
+    mic,
+    couponRate,
+    maturityDate,
+    freqMonths
+  ).catch((err) => {
+    console.warn(`[boerseFrankfurt] price_information(${isin}) 조회 실패:`, err);
+    return { bidYield: null, askYield: null, lastPriceYield: null } as BondQuote;
+  });
 
   return {
     isin,
@@ -498,6 +514,6 @@ export async function getBondDetail(isin: string): Promise<BondDetail> {
     bidYield: quote.bidYield,
     askYield: quote.askYield,
     lastPriceYield: quote.lastPriceYield,
-    couponFrequencyMonths: frequencyFromFirstPayGap(issueDate, firstAnnualPayDate),
+    couponFrequencyMonths: freqMonths,
   };
 }
