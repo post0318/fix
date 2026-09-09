@@ -1,4 +1,5 @@
 import {
+  CallScenario,
   CouponFrequency,
   Currency,
   InvestorType,
@@ -7,9 +8,12 @@ import {
 } from "@/types/bondLayout";
 import { FREQUENCY_MONTHS, addMonths } from "@/lib/couponSchedule";
 import {
+  BASIS_INDEX,
   anbimaCouponFactor,
   computeBondPricing,
+  getEffectiveRedemption,
   roundDown,
+  yearFrac,
 } from "@/lib/bondPricing";
 import { getEffectiveIncomeTaxRate } from "@/lib/taxRules";
 
@@ -41,6 +45,15 @@ export interface CashFlowScheduleInputs {
   backFeeRate: string;
   investorType: InvestorType;
   taxStatus: TaxStatus;
+
+  // 콜/조기상환 시나리오. 모두 생략 가능하며, hasCall이 false이거나 시나리오
+  // 입력이 불완전하면 만기보유(hold)로 계산된다.
+  hasCall?: boolean;
+  callScenario?: CallScenario;
+  parCallDate?: string;
+  makeWholeRedemptionDate?: string;
+  makeWholeRefYield?: string;
+  makeWholeSpreadBps?: string;
 }
 
 function daysBetween(a: Date, b: Date): number {
@@ -76,16 +89,48 @@ export function generateFixCashFlow(
     trustInvestmentAmount * (Number(input.frontFeeRate) / 100)
   );
 
-  // 이자계산일 목록: 결제일 이후 첫 이표일부터 만기일까지 (만기일 그대로 마지막 원금상환일)
+  // 콜/조기상환 시나리오. hold이면 redemption === maturity, 배수 1로 현행과 동일.
+  const eff = getEffectiveRedemption({
+    hasCall: input.hasCall ?? false,
+    callScenario: input.callScenario ?? "hold",
+    maturityDate: input.maturityDate,
+    parCallDate: input.parCallDate ?? "",
+    makeWholeRedemptionDate: input.makeWholeRedemptionDate ?? "",
+    makeWholeRefYield: input.makeWholeRefYield ?? "",
+    makeWholeSpreadBps: input.makeWholeSpreadBps ?? "",
+    couponRate: input.couponRate,
+    couponFrequency: input.couponFrequency,
+    calcBasis: input.calcBasis,
+    tradeCurrency: input.tradeCurrency,
+  });
+  const redemption = new Date(eff.redemptionDate);
+  if (Number.isNaN(redemption.getTime())) return null;
+
+  // 이자계산일 목록: 결제일 이후 첫 이표일부터 상환일(만기 또는 콜)까지.
+  // 상환일이 이표 그리드에 없으면(예: "만기 1개월 전" par call) 마지막 행은
+  // 상환일에 스텁(부분기간) 쿠폰 + 원금이 된다.
   const dates: Date[] = [];
-  let cursor = new Date(pricing.recentCouponDate);
-  cursor = addMonths(cursor, months);
-  while (cursor <= maturity) {
+  let cursor = addMonths(new Date(pricing.recentCouponDate), months);
+  while (toTime(cursor) < toTime(redemption)) {
     dates.push(cursor);
-    if (toTime(cursor) === toTime(maturity)) break;
     cursor = addMonths(cursor, months);
   }
+  const redemptionOnGrid = toTime(cursor) === toTime(redemption);
+  const stubRedemption = !redemptionOnGrid;
+  dates.push(redemptionOnGrid ? cursor : new Date(redemption));
   if (dates.length === 0) return null;
+
+  // 스텁 최종행의 쿠폰 비율 = (직전 이표일~상환일) / (직전 이표일~다음 예정 이표일).
+  const basisIdx = BASIS_INDEX[input.calcBasis];
+  const prevGridCoupon =
+    dates.length >= 2
+      ? dates[dates.length - 2]
+      : new Date(pricing.recentCouponDate);
+  const fullPeriodFrac = yearFrac(prevGridCoupon, cursor, basisIdx);
+  const stubFraction =
+    stubRedemption && fullPeriodFrac > 0
+      ? yearFrac(prevGridCoupon, redemption, basisIdx) / fullPeriodFrac
+      : 1;
 
   // 브라질 국채(Business/252)는 표면금리를 단순 나눗셈이 아니라 복리로 환산한
   // 반기 실효쿠폰을 지급한다(예: 연 10% -> 반기 4.880885%). 블룸버그 실제 값과
@@ -111,9 +156,17 @@ export function generateFixCashFlow(
   let carryBackFeeResidual = 0;
 
   dates.forEach((date, index) => {
-    const isMaturity = toTime(date) === toTime(maturity);
-    const principal = truncByCurrency(isMaturity ? pricing.faceValue * maturityFxRate : 0);
-    const interest = truncByCurrency(couponAmount);
+    // 마지막 행 = 원금상환일(만기 또는 콜). 콜이면 원금에 상환배수(make-whole
+    // 프리미엄)를 적용하고, 이표 그리드에 없는 상환일이면 쿠폰은 스텁(부분기간).
+    const isRedemption = index === dates.length - 1;
+    const periodCoupon =
+      isRedemption && stubRedemption ? couponAmount * stubFraction : couponAmount;
+    const principal = truncByCurrency(
+      isRedemption
+        ? pricing.faceValue * eff.redemptionPriceFactor * maturityFxRate
+        : 0
+    );
+    const interest = truncByCurrency(periodCoupon);
 
     let taxableIncome: number;
     if (index === 0) {
@@ -124,7 +177,7 @@ export function generateFixCashFlow(
         input.calcBasis === "Business/252"
           ? roundDown(pricing.accruedInterest, 2) * maturityFxRate
           : couponAmount * pricing.accrualFraction * freqPerYear;
-      taxableIncome = truncByCurrency(couponAmount - preOwnedInterest);
+      taxableIncome = truncByCurrency(periodCoupon - preOwnedInterest);
     } else {
       taxableIncome = interest;
     }

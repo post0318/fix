@@ -1,4 +1,4 @@
-import { CalcBasis, CouponFrequency } from "@/types/bondLayout";
+import { CalcBasis, CallScenario, CouponFrequency } from "@/types/bondLayout";
 import {
   FREQUENCY_MONTHS,
   FREQUENCY_PER_YEAR,
@@ -479,5 +479,138 @@ export function computeBondPricing(
     accruedInterest,
     settlementAmount,
     cashBalance,
+  };
+}
+
+/**
+ * make-whole 상환가(clean price, per `redemptionBasis` 액면).
+ * 프로스펙터스 관행: "greater of (1) 100% of principal, (2) 잔여 예정
+ * 원리금을 (기준 국채금리 + 스프레드)로 할인한 값(less accrued)". 여기서는
+ * 엑셀 PRICE 방식(computeCleanPrice)으로 (2)의 clean price를 구해 액면과
+ * 비교한다. 결과는 참고용 추정치다 — 실제 make-whole 금리는 상환통지 시점의
+ * H.15 CMT(잔존만기 보간)를 쓴다.
+ */
+export function computeMakeWholePrice(
+  redemptionDate: Date,
+  maturity: Date,
+  annualRate: number,
+  refYield: number,
+  spreadBps: number,
+  redemptionBasis: number,
+  frequency: CouponFrequency,
+  basis = 0
+): number | null {
+  if (redemptionDate >= maturity) return null;
+  if (Number.isNaN(refYield) || Number.isNaN(spreadBps)) return null;
+  const discountYield = refYield + spreadBps / 10000;
+  const clean = computeCleanPrice(
+    redemptionDate,
+    maturity,
+    annualRate,
+    discountYield,
+    redemptionBasis,
+    frequency,
+    basis
+  );
+  if (clean === null) return null;
+  return Math.max(redemptionBasis, clean);
+}
+
+export interface EffectiveRedemptionInput {
+  hasCall: boolean;
+  callScenario: CallScenario;
+  maturityDate: string;
+  parCallDate: string;
+  makeWholeRedemptionDate: string;
+  makeWholeRefYield: string; // %
+  makeWholeSpreadBps: string; // bp
+  couponRate: string; // %
+  couponFrequency: CouponFrequency;
+  calcBasis: CalcBasis;
+  tradeCurrency: string;
+}
+
+export interface EffectiveRedemption {
+  /** 실제 원금상환일 (YYYY-MM-DD) */
+  redemptionDate: string;
+  /** 원금상환 배수 (1 = 액면, >1 = make-whole 프리미엄) */
+  redemptionPriceFactor: number;
+  /** make-whole 상환가 (per 100 액면). 시나리오가 makeWhole이고 계산 가능할 때만. */
+  makeWholePricePer100: number | null;
+  /** 실제로 적용된 시나리오. 입력이 불완전하면 "hold"로 폴백한다. */
+  applied: CallScenario;
+}
+
+/**
+ * 콜 시나리오에 따른 실효 원금상환일·상환배수를 구한다. hasCall=false거나
+ * 시나리오 입력(날짜·금리 등)이 불완전하면 만기보유(hold)로 폴백한다.
+ * 매수 시점 계산(computeBondPricing)에는 영향을 주지 않고, 현금흐름·수익률
+ * 산출에만 쓰인다.
+ */
+export function getEffectiveRedemption(
+  input: EffectiveRedemptionInput
+): EffectiveRedemption {
+  const hold: EffectiveRedemption = {
+    redemptionDate: input.maturityDate,
+    redemptionPriceFactor: 1,
+    makeWholePricePer100: null,
+    applied: "hold",
+  };
+
+  const maturity = new Date(input.maturityDate);
+  if (Number.isNaN(maturity.getTime())) return hold;
+  if (!input.hasCall || input.callScenario === "hold") return hold;
+
+  if (input.callScenario === "parCall") {
+    const d = new Date(input.parCallDate);
+    if (Number.isNaN(d.getTime()) || d >= maturity) return hold;
+    return {
+      redemptionDate: input.parCallDate,
+      redemptionPriceFactor: 1,
+      makeWholePricePer100: null,
+      applied: "parCall",
+    };
+  }
+
+  // makeWhole
+  const d = new Date(input.makeWholeRedemptionDate);
+  const refYield = Number(input.makeWholeRefYield);
+  const spreadBps = Number(input.makeWholeSpreadBps);
+  const rate = Number(input.couponRate);
+  if (
+    Number.isNaN(d.getTime()) ||
+    d >= maturity ||
+    !input.makeWholeRefYield ||
+    Number.isNaN(refYield) ||
+    !input.makeWholeSpreadBps ||
+    Number.isNaN(spreadBps) ||
+    Number.isNaN(rate)
+  ) {
+    return hold;
+  }
+
+  const isBrazil = input.calcBasis === "Business/252";
+  const redemptionBasis = isBrazil
+    ? 1000
+    : input.tradeCurrency === "KRW"
+      ? 10000
+      : 100;
+  const price = computeMakeWholePrice(
+    d,
+    maturity,
+    rate / 100,
+    refYield / 100,
+    spreadBps,
+    redemptionBasis,
+    input.couponFrequency,
+    BASIS_INDEX[input.calcBasis]
+  );
+  if (price === null) return hold;
+
+  return {
+    redemptionDate: input.makeWholeRedemptionDate,
+    redemptionPriceFactor: price / redemptionBasis,
+    makeWholePricePer100: (price / redemptionBasis) * 100,
+    applied: "makeWhole",
   };
 }

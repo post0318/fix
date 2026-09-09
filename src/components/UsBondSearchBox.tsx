@@ -64,6 +64,10 @@ interface BondTranche {
   couponFrequencyMonths: number | null;
   settlementDate: string | null;
   calcBasis: string | null;
+  parCallDate: string | null;
+  parCallMonthsBeforeMaturity: number | null;
+  makeWholeSpreadBps: number | null;
+  redemptionText: string | null;
 }
 
 interface FwpDetail {
@@ -282,6 +286,10 @@ export function UsBondSearchBox({ disabled, active, onApply }: UsBondSearchBoxPr
         couponFrequencyMonths: frequencyFromTreasuryLabel(bond.data.frequency),
         settlementDate: bond.data.issueDate,
         calcBasis: "ACT/ACT",
+        parCallDate: null,
+        parCallMonthsBeforeMaturity: null,
+        makeWholeSpreadBps: null,
+        redemptionText: null,
       };
       applyTranche(tranche, TREASURY_COMPANY.name, "USD", true);
       fetch("/api/country-rating?slug=united-states")
@@ -346,6 +354,22 @@ export function UsBondSearchBox({ disabled, active, onApply }: UsBondSearchBoxPr
       fields.tradeCurrency = currency as Currency;
     }
 
+    // 콜조항: FWP/424B에서 파싱된 값이 있으면 반영, 없으면 초기화(이전 선택
+    // 잔존 방지). 시나리오는 항상 만기보유로 시작한다.
+    const parsedHasCall =
+      !isTreasury &&
+      (tranche.parCallDate !== null || tranche.makeWholeSpreadBps !== null);
+    fields.hasCall = parsedHasCall;
+    fields.parCallDate =
+      !isTreasury && tranche.parCallDate ? tranche.parCallDate : "";
+    fields.makeWholeSpreadBps =
+      !isTreasury && tranche.makeWholeSpreadBps !== null
+        ? String(tranche.makeWholeSpreadBps)
+        : "";
+    fields.callScenario = "hold";
+    fields.makeWholeRedemptionDate = "";
+    fields.makeWholeRefYield = "";
+
     onApply(fields, { disclosureRating: !isTreasury && !!tranche.rating });
     setRatingLink(isTreasury ? null : FINRA_FIXED_INCOME_URL);
     setRatingCusip(!isTreasury && tranche.isin ? cusipFromIsin(tranche.isin) : null);
@@ -355,6 +379,7 @@ export function UsBondSearchBox({ disabled, active, onApply }: UsBondSearchBoxPr
     if (!tranche.rating) missing.push("신용등급");
     if (!frequency) missing.push("지급주기");
     if (!tranche.calcBasis) missing.push("날짜계산기준");
+    if (!isTreasury && !parsedHasCall) missing.push("콜조항");
     const baseStatus =
       missing.length > 0
         ? `일부 항목을 반영했습니다. ${missing.join("/")}은(는) 자동으로 찾지 못해 직접 입력이 필요합니다.`

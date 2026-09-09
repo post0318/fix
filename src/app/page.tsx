@@ -4,8 +4,36 @@ import { useMemo, useState } from "react";
 import { BondLayoutForm } from "@/components/BondLayoutForm";
 import { CashFlowTable } from "@/components/CashFlowTable";
 import { generateFixCashFlow } from "@/lib/cashFlowSchedule";
+import { getEffectiveRedemption } from "@/lib/bondPricing";
 import { decodeBondLink } from "@/lib/bondLink";
 import { BondLayoutInput } from "@/types/bondLayout";
+
+/** 현금흐름표 위에 붙일 시나리오 캡션. hold이면 null. */
+function scenarioNote(input: BondLayoutInput): string | null {
+  const eff = getEffectiveRedemption({
+    hasCall: input.hasCall,
+    callScenario: input.callScenario,
+    maturityDate: input.maturityDate,
+    parCallDate: input.parCallDate,
+    makeWholeRedemptionDate: input.makeWholeRedemptionDate,
+    makeWholeRefYield: input.makeWholeRefYield,
+    makeWholeSpreadBps: input.makeWholeSpreadBps,
+    couponRate: input.couponRate,
+    couponFrequency: input.couponFrequency,
+    calcBasis: input.calcBasis,
+    tradeCurrency: input.tradeCurrency,
+  });
+  if (eff.applied === "parCall") {
+    return `시나리오: Par Call 행사 · ${eff.redemptionDate} 액면상환`;
+  }
+  if (eff.applied === "makeWhole") {
+    const px = eff.makeWholePricePer100;
+    return `시나리오: Make-Whole 상환 · ${eff.redemptionDate}${
+      px != null ? ` · 상환가 ${px.toFixed(3)} (참고용 추정)` : ""
+    }`;
+  }
+  return null;
+}
 
 function todayDateString(): string {
   const now = new Date();
@@ -38,6 +66,12 @@ function createDefaultInput(): BondLayoutInput {
     frontFeeRate: "0.00",
     backFeeRate: "0.00",
     incomeTaxRate: "15.40",
+    hasCall: false,
+    parCallDate: "",
+    makeWholeSpreadBps: "",
+    callScenario: "hold",
+    makeWholeRedemptionDate: "",
+    makeWholeRefYield: "",
   };
 }
 
@@ -78,6 +112,12 @@ export default function Home() {
         backFeeRate: input.backFeeRate,
         investorType: input.investorType,
         taxStatus: input.taxStatus,
+        hasCall: input.hasCall,
+        callScenario: input.callScenario,
+        parCallDate: input.parCallDate,
+        makeWholeRedemptionDate: input.makeWholeRedemptionDate,
+        makeWholeRefYield: input.makeWholeRefYield,
+        makeWholeSpreadBps: input.makeWholeSpreadBps,
       }),
     [
       input.maturityDate,
@@ -96,6 +136,12 @@ export default function Home() {
       input.backFeeRate,
       input.investorType,
       input.taxStatus,
+      input.hasCall,
+      input.callScenario,
+      input.parCallDate,
+      input.makeWholeRedemptionDate,
+      input.makeWholeRefYield,
+      input.makeWholeSpreadBps,
     ]
   );
 
@@ -141,6 +187,7 @@ export default function Home() {
           <CashFlowTable
             rows={cashFlowRows}
             custodyCurrency={input.custodyCurrency}
+            scenarioNote={scenarioNote(input)}
           />
         </div>
       </main>

@@ -13,6 +13,7 @@ import {
 import {
   BondLayoutInput,
   CalcBasis,
+  CallScenario,
   CouponFrequency,
   Currency,
   InvestorType,
@@ -24,7 +25,10 @@ import {
   getSettlementDate,
   getTrustMaturityDate,
 } from "@/lib/couponSchedule";
-import { computeBondPricing } from "@/lib/bondPricing";
+import {
+  computeBondPricing,
+  getEffectiveRedemption,
+} from "@/lib/bondPricing";
 import { generateFixCashFlow } from "@/lib/cashFlowSchedule";
 import { computeMaturitySummary } from "@/lib/maturitySummary";
 import { parseBondFile } from "@/lib/parseBondFile";
@@ -61,16 +65,35 @@ function formatSettlementAmount(n: number, isKrw: boolean): string {
  * 같으면 환율은 1로 고정, 다르면 사용자가 직접 입력해야 하므로 비워둔다.
  * 거래통화 셀렉트를 수동으로 바꿀 때의 동작과 동일하다.
  */
+/**
+ * 만기일이 새 종목 값으로 바뀔 때, 이전 종목에 걸려 있던 신탁만기일 수기
+ * override·콜조항 필드를 기본값으로 되돌린다. incoming이 해당 키를 이미
+ * 명시했으면 건드리지 않는다.
+ */
+function clearedCallFields(
+  incoming: Partial<BondLayoutInput>
+): Partial<BondLayoutInput> {
+  const cleared: Partial<BondLayoutInput> = {};
+  if (incoming.trustMaturityDate === undefined) cleared.trustMaturityDate = "";
+  if (incoming.hasCall === undefined) cleared.hasCall = false;
+  if (incoming.parCallDate === undefined) cleared.parCallDate = "";
+  if (incoming.makeWholeSpreadBps === undefined) cleared.makeWholeSpreadBps = "";
+  if (incoming.callScenario === undefined) cleared.callScenario = "hold";
+  if (incoming.makeWholeRedemptionDate === undefined)
+    cleared.makeWholeRedemptionDate = "";
+  if (incoming.makeWholeRefYield === undefined) cleared.makeWholeRefYield = "";
+  return cleared;
+}
+
 function applyFieldsWithCurrencySync(
   value: BondLayoutInput,
   incomingFields: Partial<BondLayoutInput>
 ): BondLayoutInput {
   // 다른 종목을 반영해 만기일이 바뀌면, 이전 종목에 걸어둔 신탁만기일 수기
-  // 수정값은 무의미하므로 자동계산으로 되돌린다(검색 쪽이 값을 명시한 경우 제외).
+  // 수정값·콜조항은 무의미하므로 초기화한다(검색 쪽이 값을 명시한 경우 제외).
   const fields =
-    incomingFields.maturityDate !== undefined &&
-    incomingFields.trustMaturityDate === undefined
-      ? { ...incomingFields, trustMaturityDate: "" }
+    incomingFields.maturityDate !== undefined
+      ? { ...clearedCallFields(incomingFields), ...incomingFields }
       : incomingFields;
   const tradeCurrency = fields.tradeCurrency;
   if (!tradeCurrency) {
@@ -171,6 +194,42 @@ function formatTwoDecimals(raw: string): string {
   return Number.isNaN(num) ? raw : num.toFixed(2);
 }
 
+interface YieldCurve {
+  date: string;
+  points: { years: number; rate: number }[];
+}
+
+/** 국채 수익률곡선에서 잔존만기(연) 금리를 선형보간 (양끝 클램프) */
+function interpCurve(curve: YieldCurve, years: number): number | null {
+  const pts = curve.points;
+  if (!pts || pts.length === 0) return null;
+  if (years <= pts[0].years) return pts[0].rate;
+  if (years >= pts[pts.length - 1].years) return pts[pts.length - 1].rate;
+  for (let i = 1; i < pts.length; i++) {
+    const lo = pts[i - 1];
+    const hi = pts[i];
+    if (years <= hi.years) {
+      const t = (years - lo.years) / (hi.years - lo.years);
+      return lo.rate + t * (hi.rate - lo.rate);
+    }
+  }
+  return pts[pts.length - 1].rate;
+}
+
+/** 두 ISO 날짜 사이 연수 (365.25일 기준) */
+function yearsBetweenIso(from: string, to: string): number | null {
+  const a = new Date(from).getTime();
+  const b = new Date(to).getTime();
+  if (Number.isNaN(a) || Number.isNaN(b) || b <= a) return null;
+  return (b - a) / (365.25 * 24 * 60 * 60 * 1000);
+}
+
+const CALL_SCENARIO_LABELS: { value: CallScenario; label: string }[] = [
+  { value: "hold", label: "만기보유" },
+  { value: "parCall", label: "Par Call 행사" },
+  { value: "makeWhole", label: "Make-Whole 상환" },
+];
+
 /** 선취보수(차감) = 신탁투자금액 x 선취보수율 */
 function getFrontFeeAmount(
   trustInvestmentAmount: string,
@@ -261,6 +320,8 @@ export function BondLayoutForm({
   // 출처(국채/한국/브라질/종목검색/수기입력/업로드)로 바뀌면 false로
   // 되돌린다.
   const [disclosureRating, setDisclosureRating] = useState(false);
+  const [treasuryCurve, setTreasuryCurve] = useState<YieldCurve | null>(null);
+  const [treasuryStatus, setTreasuryStatus] = useState<string | null>(null);
 
   const update = <K extends keyof BondLayoutInput>(
     key: K,
@@ -299,6 +360,37 @@ export function BondLayoutForm({
     ]
   );
 
+  // 콜/조기상환 시나리오의 실효 원금상환일·상환배수. hold이면 만기·배수 1.
+  const effectiveRedemption = useMemo(
+    () =>
+      getEffectiveRedemption({
+        hasCall: value.hasCall,
+        callScenario: value.callScenario,
+        maturityDate: value.maturityDate,
+        parCallDate: value.parCallDate,
+        makeWholeRedemptionDate: value.makeWholeRedemptionDate,
+        makeWholeRefYield: value.makeWholeRefYield,
+        makeWholeSpreadBps: value.makeWholeSpreadBps,
+        couponRate: value.couponRate,
+        couponFrequency: value.couponFrequency,
+        calcBasis: value.calcBasis,
+        tradeCurrency: value.tradeCurrency,
+      }),
+    [
+      value.hasCall,
+      value.callScenario,
+      value.maturityDate,
+      value.parCallDate,
+      value.makeWholeRedemptionDate,
+      value.makeWholeRefYield,
+      value.makeWholeSpreadBps,
+      value.couponRate,
+      value.couponFrequency,
+      value.calcBasis,
+      value.tradeCurrency,
+    ]
+  );
+
   const cashFlowRows = useMemo(
     () =>
       generateFixCashFlow({
@@ -318,6 +410,12 @@ export function BondLayoutForm({
         backFeeRate: value.backFeeRate,
         investorType: value.investorType,
         taxStatus: value.taxStatus,
+        hasCall: value.hasCall,
+        callScenario: value.callScenario,
+        parCallDate: value.parCallDate,
+        makeWholeRedemptionDate: value.makeWholeRedemptionDate,
+        makeWholeRefYield: value.makeWholeRefYield,
+        makeWholeSpreadBps: value.makeWholeSpreadBps,
       }),
     [
       value.maturityDate,
@@ -336,6 +434,12 @@ export function BondLayoutForm({
       value.backFeeRate,
       value.investorType,
       value.taxStatus,
+      value.hasCall,
+      value.callScenario,
+      value.parCallDate,
+      value.makeWholeRedemptionDate,
+      value.makeWholeRefYield,
+      value.makeWholeSpreadBps,
     ]
   );
 
@@ -345,6 +449,7 @@ export function BondLayoutForm({
         ? computeMaturitySummary(cashFlowRows, {
             trustContractDate: value.trustContractDate,
             maturityDate: value.maturityDate,
+            redemptionDate: effectiveRedemption.redemptionDate,
             trustMaturityDate: value.trustMaturityDate,
             comprehensiveTaxRate: value.incomeTaxRate,
           })
@@ -353,10 +458,46 @@ export function BondLayoutForm({
       cashFlowRows,
       value.trustContractDate,
       value.maturityDate,
+      effectiveRedemption.redemptionDate,
       value.trustMaturityDate,
       value.incomeTaxRate,
     ]
   );
+
+  // make-whole 기준 국채금리 자동채움: 국채곡선을 받아 (상환일~만기) 잔존만기로
+  // 보간해 makeWholeRefYield에 넣는다. 시나리오/상환일 변경 핸들러가 만든 다음
+  // 상태(next)를 그대로 받아, 같은 turn의 변경을 덮어쓰지 않는다.
+  const applyMakeWholeRate = async (next: BondLayoutInput, force: boolean) => {
+    if (next.callScenario !== "makeWhole") return;
+    if (!next.makeWholeRedemptionDate || !next.maturityDate) return;
+    if (!force && next.makeWholeRefYield.trim() !== "") return;
+    const years = yearsBetweenIso(
+      next.makeWholeRedemptionDate,
+      next.maturityDate
+    );
+    if (years === null) return;
+
+    let curve = treasuryCurve;
+    if (!curve) {
+      try {
+        const res = await fetch("/api/treasury-yield");
+        if (!res.ok) throw new Error();
+        curve = (await res.json()) as YieldCurve;
+        setTreasuryCurve(curve);
+      } catch {
+        setTreasuryStatus(
+          "국채 수익률곡선을 불러오지 못했습니다. 기준금리를 직접 입력하세요."
+        );
+        return;
+      }
+    }
+    const rate = interpCurve(curve, years);
+    if (rate === null) return;
+    setTreasuryStatus(
+      `${curve.date} 국채곡선 · 잔존 ${years.toFixed(1)}년 보간값`
+    );
+    onChange({ ...next, makeWholeRefYield: rate.toFixed(3) });
+  };
 
   const handleUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -371,10 +512,10 @@ export function BondLayoutForm({
         setUploadStatus("일치하는 항목을 찾지 못했습니다.");
         return;
       }
-      // 만기일이 새로 들어왔는데 신탁만기일이 파일에 없으면 자동계산으로 리셋.
+      // 만기일이 새로 들어왔으면 이전 종목의 신탁만기일 override·콜조항을 초기화.
       const merged =
-        parsed.maturityDate !== undefined && parsed.trustMaturityDate === undefined
-          ? { ...value, ...parsed, trustMaturityDate: "" }
+        parsed.maturityDate !== undefined
+          ? { ...value, ...clearedCallFields(parsed), ...parsed }
           : { ...value, ...parsed };
       onChange(merged);
       onLockedChange(true);
@@ -944,7 +1085,12 @@ export function BondLayoutForm({
           </Row>
           <Row label="신탁만기일" editable>
             {(() => {
-              const autoDate = getTrustMaturityDate(value.maturityDate, "") ?? "";
+              // 콜 시나리오면 실효 상환일 기준(+11일), 아니면 만기일 기준.
+              const autoDate =
+                getTrustMaturityDate(
+                  effectiveRedemption.redemptionDate || value.maturityDate,
+                  ""
+                ) ?? "";
               const isOverridden = value.trustMaturityDate.trim() !== "";
               if (!isOverridden && autoDate === "") return <ComputedValue />;
               return (
@@ -979,7 +1125,7 @@ export function BondLayoutForm({
             {(() => {
               const days = getInvestmentDays(
                 value.trustContractDate,
-                value.maturityDate,
+                effectiveRedemption.redemptionDate || value.maturityDate,
                 value.trustMaturityDate
               );
               return days !== null ? (
@@ -1111,6 +1257,158 @@ export function BondLayoutForm({
               <ComputedValue />
             )}
           </Row>
+        </GroupCard>
+
+        <GroupCard title="콜 / 조기상환">
+          <Row label="콜조항" editable>
+            <label className="flex items-center gap-2 text-sm text-zinc-900 dark:text-zinc-100">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-orange-600"
+                checked={value.hasCall}
+                onChange={(e) =>
+                  onChange({
+                    ...value,
+                    hasCall: e.target.checked,
+                    callScenario: e.target.checked ? value.callScenario : "hold",
+                  })
+                }
+              />
+              <span>{value.hasCall ? "있음" : "없음"}</span>
+            </label>
+          </Row>
+
+          {value.hasCall && (
+            <>
+              <Row label="Par Call일" editable>
+                <input
+                  className={inputClass}
+                  type="date"
+                  value={value.parCallDate}
+                  onChange={(e) =>
+                    update("parCallDate", clampDateYear(e.target.value))
+                  }
+                  onKeyDown={commitOnEnter}
+                />
+              </Row>
+              <Row label="Make-Whole 스프레드(bp)" editable>
+                <input
+                  className={inputClass}
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="예: 15"
+                  value={value.makeWholeSpreadBps}
+                  onFocus={selectAllOnFocus}
+                  onChange={(e) => {
+                    if (PERCENT_INPUT_PATTERN.test(e.target.value)) {
+                      update("makeWholeSpreadBps", e.target.value);
+                    }
+                  }}
+                  onKeyDown={commitOnEnter}
+                />
+              </Row>
+              <Row label="시나리오" editable>
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  {CALL_SCENARIO_LABELS.map((opt) => (
+                    <label
+                      key={opt.value}
+                      className="flex items-center gap-1.5 text-sm text-zinc-900 dark:text-zinc-100"
+                    >
+                      <input
+                        type="radio"
+                        name="callScenario"
+                        className="h-3.5 w-3.5 accent-orange-600"
+                        checked={value.callScenario === opt.value}
+                        onChange={() => {
+                          const next = { ...value, callScenario: opt.value };
+                          onChange(next);
+                          if (opt.value === "makeWhole") {
+                            void applyMakeWholeRate(next, false);
+                          }
+                        }}
+                      />
+                      <span>{opt.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </Row>
+
+              {value.callScenario === "makeWhole" && (
+                <>
+                  <Row label="Make-Whole 상환일" editable>
+                    <input
+                      className={inputClass}
+                      type="date"
+                      value={value.makeWholeRedemptionDate}
+                      onChange={(e) => {
+                        const next = {
+                          ...value,
+                          makeWholeRedemptionDate: clampDateYear(e.target.value),
+                        };
+                        onChange(next);
+                        void applyMakeWholeRate(next, false);
+                      }}
+                      onKeyDown={commitOnEnter}
+                    />
+                  </Row>
+                  <Row label="기준 국채금리(%)" editable>
+                    <div className="flex w-full items-center gap-2">
+                      <input
+                        className={inputClass}
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="예: 4.250"
+                        value={value.makeWholeRefYield}
+                        onFocus={selectAllOnFocus}
+                        onChange={(e) => {
+                          if (/^\d*(\.\d{0,3})?$/.test(e.target.value)) {
+                            update("makeWholeRefYield", e.target.value);
+                          }
+                        }}
+                        onKeyDown={commitOnEnter}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void applyMakeWholeRate(value, true)}
+                        className="shrink-0 rounded border border-zinc-300 px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-white dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 print:hidden"
+                      >
+                        자동
+                      </button>
+                    </div>
+                  </Row>
+                  <Row label="Make-Whole 상환가">
+                    {effectiveRedemption.makeWholePricePer100 != null ? (
+                      <span className="text-sm text-zinc-900 dark:text-zinc-100">
+                        {effectiveRedemption.makeWholePricePer100.toFixed(3)}
+                        <span className="ml-1 text-xs text-zinc-400 dark:text-zinc-600">
+                          참고용 추정
+                        </span>
+                      </span>
+                    ) : (
+                      <ComputedValue />
+                    )}
+                  </Row>
+                  {treasuryStatus && (
+                    <Row label="">
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                        {treasuryStatus}
+                      </span>
+                    </Row>
+                  )}
+                </>
+              )}
+
+              {value.callScenario !== "hold" &&
+                effectiveRedemption.applied === "hold" && (
+                  <Row label="">
+                    <span className="text-xs text-amber-600 dark:text-amber-500">
+                      시나리오 입력(상환일·스프레드·기준금리)이 부족해 만기보유로
+                      계산 중입니다.
+                    </span>
+                  </Row>
+                )}
+            </>
+          )}
         </GroupCard>
       </div>
     </section>

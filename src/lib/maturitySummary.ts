@@ -7,7 +7,12 @@ const DEFAULT_COMPREHENSIVE_TAX_RATE = 0.154;
 export interface MaturitySummaryInputs {
   trustContractDate: string;
   maturityDate: string;
-  /** 신탁만기일 수기 수정값. 있으면 투자일수(수익률 연환산 분모)가 이 값 기준으로 산출된다. */
+  /**
+   * 콜 시나리오의 실효 원금상환일. 있으면 투자일수(수익률 연환산 분모)가
+   * 만기일 대신 이 값 기준으로 산출된다(현금흐름표도 이 날짜에 끝나야 일관).
+   */
+  redemptionDate?: string;
+  /** 신탁만기일 수기 수정값. 있으면 투자일수가 이 값 기준으로 산출된다. */
   trustMaturityDate?: string;
   comprehensiveTaxRate: string;
 }
@@ -37,7 +42,7 @@ export function computeMaturitySummary(
 ): MaturitySummary | null {
   const investmentDays = getInvestmentDays(
     input.trustContractDate,
-    input.maturityDate,
+    input.redemptionDate || input.maturityDate,
     input.trustMaturityDate
   );
   if (!investmentDays || rows.length === 0) return null;

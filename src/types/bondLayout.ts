@@ -14,6 +14,15 @@ export type Currency = "USD" | "EUR" | "CNY" | "JPY" | "KRW" | "BRL";
 
 export type TaxStatus = "일반과세" | "비과세(농특세)" | "비과세";
 
+/**
+ * 콜/조기상환 시나리오.
+ * - hold: 만기보유 (기본, 현행 동작)
+ * - parCall: par call일에 액면(100%) 조기상환
+ * - makeWhole: 지정일에 make-whole 상환가(잔여현금흐름을 국채금리+스프레드로
+ *   할인한 값과 액면 중 큰 값)로 조기상환
+ */
+export type CallScenario = "hold" | "parCall" | "makeWhole";
+
 export interface BondLayoutInput {
   calcBasis: CalcBasis;
   investorType: InvestorType;
@@ -40,4 +49,17 @@ export interface BondLayoutInput {
   frontFeeRate: string;
   backFeeRate: string;
   incomeTaxRate: string;
+
+  /** 콜조항 존재 여부. false면 콜 관련 입력을 모두 무시하고 만기보유로 계산. */
+  hasCall: boolean;
+  /** par call일(YYYY-MM-DD). 자동 파싱 또는 수기. "" = 미설정. */
+  parCallDate: string;
+  /** make-whole 스프레드(bp, 예 "15"). "" = 미확인. */
+  makeWholeSpreadBps: string;
+  /** 선택 시나리오. hasCall=false면 항상 hold로 취급. */
+  callScenario: CallScenario;
+  /** makeWhole 시나리오의 상환일(YYYY-MM-DD). */
+  makeWholeRedemptionDate: string;
+  /** makeWhole 상환가 계산용 기준 국채금리(%). 곡선에서 자동채움 후 수정 가능. */
+  makeWholeRefYield: string;
 }

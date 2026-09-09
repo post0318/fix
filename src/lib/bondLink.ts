@@ -5,11 +5,23 @@ import {
 import {
   BondLayoutInput,
   CalcBasis,
+  CallScenario,
   CouponFrequency,
   Currency,
   InvestorType,
   TaxStatus,
 } from "@/types/bondLayout";
+
+const CALL_SCENARIO_TO_CODE: Record<CallScenario, number> = {
+  hold: 0,
+  parCall: 1,
+  makeWhole: 2,
+};
+const CALL_SCENARIO_BY_CODE: Record<number, CallScenario> = {
+  0: "hold",
+  1: "parCall",
+  2: "makeWhole",
+};
 
 const COUPON_FREQUENCY_TO_CODE: Record<CouponFrequency, number> = {
   "3개월": 1,
@@ -147,6 +159,12 @@ function pack(value: BondLayoutInput): string {
     value.backFeeRate,
     value.incomeTaxRate,
     stripDateDashes(value.trustMaturityDate),
+    value.hasCall ? "1" : "",
+    stripDateDashes(value.parCallDate),
+    value.makeWholeSpreadBps,
+    String(CALL_SCENARIO_TO_CODE[value.callScenario] ?? 0),
+    stripDateDashes(value.makeWholeRedemptionDate),
+    value.makeWholeRefYield,
   ];
   return fields.map((f) => (f ?? "").replace(/\|/g, " ")).join("|");
 }
@@ -177,6 +195,12 @@ function unpack(text: string): Partial<BondLayoutInput> | null {
     backFeeRate,
     incomeTaxRate,
     trustMaturityDate,
+    hasCall,
+    parCallDate,
+    makeWholeSpreadBps,
+    callScenarioCode,
+    makeWholeRedemptionDate,
+    makeWholeRefYield,
   ] = parts;
 
   const result: Partial<BondLayoutInput> = {};
@@ -190,6 +214,16 @@ function unpack(text: string): Partial<BondLayoutInput> | null {
   if (maturityFxRate) result.maturityFxRate = maturityFxRate;
   if (trustContractDate) result.trustContractDate = restoreDateDashes(trustContractDate);
   if (trustMaturityDate) result.trustMaturityDate = restoreDateDashes(trustMaturityDate);
+  if (hasCall === "1") result.hasCall = true;
+  if (parCallDate) result.parCallDate = restoreDateDashes(parCallDate);
+  if (makeWholeSpreadBps) result.makeWholeSpreadBps = makeWholeSpreadBps;
+  if (makeWholeRedemptionDate)
+    result.makeWholeRedemptionDate = restoreDateDashes(makeWholeRedemptionDate);
+  if (makeWholeRefYield) result.makeWholeRefYield = makeWholeRefYield;
+  if (callScenarioCode) {
+    const scenario = CALL_SCENARIO_BY_CODE[Number(callScenarioCode)];
+    if (scenario) result.callScenario = scenario;
+  }
   if (purchaseYield) result.purchaseYield = purchaseYield;
   if (trustInvestmentAmount) result.trustInvestmentAmount = trustInvestmentAmount;
   if (frontFeeRate) result.frontFeeRate = frontFeeRate;

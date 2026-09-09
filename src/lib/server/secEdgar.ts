@@ -1,5 +1,6 @@
 import { getRedis } from "@/lib/server/redis";
 import { COUNTRY_ISSUER_SEC_CIK } from "@/lib/countryIssuerAliases";
+import { addMonths, toDateString } from "@/lib/couponSchedule";
 
 const USER_AGENT = "ChaeGwonSesangBondApp research-contact@chaegwonsesang.example";
 const TICKERS_URL = "https://www.sec.gov/files/company_tickers.json";
@@ -274,6 +275,121 @@ export interface BondTranche {
   couponFrequencyMonths: number | null;
   settlementDate: string | null;
   calcBasis: string | null;
+  /** par call일(YYYY-MM-DD). 명시적 날짜 또는 상대표현+만기로 계산. */
+  parCallDate: string | null;
+  /** "만기 N개월 전" 상대표현(개월). year 표현은 ×12. */
+  parCallMonthsBeforeMaturity: number | null;
+  /** make-whole 스프레드(bp). */
+  makeWholeSpreadBps: number | null;
+  /** "Optional Redemption" 섹션 앞부분(표시/디버그용). */
+  redemptionText: string | null;
+}
+
+export interface RedemptionTerms {
+  parCallDate: string | null;
+  parCallMonthsBeforeMaturity: number | null;
+  makeWholeSpreadBps: number | null;
+  redemptionText: string | null;
+}
+
+const EMPTY_REDEMPTION: RedemptionTerms = {
+  parCallDate: null,
+  parCallMonthsBeforeMaturity: null,
+  makeWholeSpreadBps: null,
+  redemptionText: null,
+};
+
+/**
+ * FWP/424B의 "Optional Redemption" 조항에서 make-whole 스프레드와 par call일을
+ * 뽑는다. par call은 명시적 날짜("on or after August 15, 2034") 또는 상대표현
+ * ("the date that is 3 months prior to the maturity date")으로 적힌다 —
+ * 후자는 maturityDate가 있으면 계산해 날짜화한다. best-effort 정규식.
+ * (실제 확인: Target 2025 FWP — "treasury rate plus 10 basis points",
+ * "1 month prior to the maturity date" / 2036 Notes는 15bp·"3 months prior".)
+ */
+function extractRedemptionTerms(
+  text: string,
+  maturityDate?: string | null
+): RedemptionTerms {
+  const raw =
+    section(text, "Optional Redemption:", otherLabels("Optional Redemption:")) ??
+    section(text, "Redemption:", otherLabels("Redemption:")) ??
+    "";
+  const source = raw || text;
+
+  let makeWholeSpreadBps: number | null = null;
+  // "(Adjusted) Treasury Rate / Reinvestment Rate ... plus N basis points".
+  // rate와 plus 사이에 "(as defined below)" 등 어구가 끼기도 한다.
+  const bpsM =
+    source.match(
+      /(?:treasury|reinvestment)\s+rate[^.]{0,90}?plus\s+([\d.]+)\s+basis points/i
+    ) ||
+    // 섹션이 redemption 전용이면 "plus N basis points" 자체가 make-whole 스프레드일 가능성이 높다.
+    (raw ? raw.match(/plus\s+([\d.]+)\s+basis points/i) : null);
+  if (bpsM) {
+    makeWholeSpreadBps = parseFloat(bpsM[1]);
+  } else {
+    const pctM = source.match(
+      /(?:treasury|reinvestment)\s+rate[^.]{0,90}?plus\s+([\d.]+)\s*%/i
+    );
+    if (pctM) makeWholeSpreadBps = Math.round(parseFloat(pctM[1]) * 100);
+  }
+
+  let parCallDate: string | null = null;
+  let parCallMonthsBeforeMaturity: number | null = null;
+  const mat = maturityDate ? new Date(maturityDate) : null;
+  const matOk = mat && !Number.isNaN(mat.getTime()) ? mat : null;
+
+  // 상대표현: "the date that is N month(s)/year(s) prior to the maturity date"
+  const relM = source.match(
+    /(\d+)\s+(month|year)s?\s+(?:prior to|before)\s+(?:the\s+)?(?:stated\s+)?maturity/i
+  );
+  if (relM) {
+    const n = parseInt(relM[1], 10);
+    parCallMonthsBeforeMaturity = /year/i.test(relM[2]) ? n * 12 : n;
+    if (matOk) {
+      parCallDate = toDateString(
+        addMonths(matOk, -parCallMonthsBeforeMaturity)
+      );
+    }
+  }
+
+  // 명시적 날짜: "on or after <date>" / "Par Call Date ... is <date>" /
+  // (Apple 등) "Prior to <date>, ... may redeem ... make-whole".
+  if (!parCallDate) {
+    const explicitM =
+      source.match(
+        /(?:on or after|par call date[^.]{0,60}?(?:is|:|of)\s*)([A-Za-z]+ \d{1,2},\s*\d{4})/i
+      ) || source.match(/\bprior to\s+([A-Za-z]+ \d{1,2},\s*\d{4})/i);
+    const parsed = explicitM ? parseUsDate(explicitM[1]) : null;
+    // 만기보다 앞서고, 지나치게 이르지 않은(만기 3년 이내) 날짜만 par call로 인정.
+    if (parsed && matOk) {
+      const d = new Date(parsed);
+      const monthsBefore =
+        (matOk.getTime() - d.getTime()) / (30.44 * 24 * 3600 * 1000);
+      if (monthsBefore > 0 && monthsBefore <= 37) {
+        parCallDate = parsed;
+        parCallMonthsBeforeMaturity = Math.round(monthsBefore);
+      }
+    } else if (parsed && !matOk) {
+      parCallDate = parsed;
+    }
+  }
+
+  if (
+    makeWholeSpreadBps === null &&
+    parCallDate === null &&
+    parCallMonthsBeforeMaturity === null
+  ) {
+    return EMPTY_REDEMPTION;
+  }
+
+  return {
+    parCallDate,
+    parCallMonthsBeforeMaturity,
+    makeWholeSpreadBps,
+    redemptionText: raw ? raw.slice(0, 240).replace(/\s+/g, " ").trim() : null,
+  };
 }
 
 export interface FwpParseResult {
@@ -461,6 +577,7 @@ function parseTrancheBlock(block: string): Omit<BondTranche, "label"> {
     couponFrequencyMonths: extractCouponFrequencyMonths(block),
     settlementDate: extractSettlementDate(block),
     calcBasis: extractDayCountBasis(block),
+    ...extractRedemptionTerms(block, maturityDate),
   };
 }
 
@@ -548,6 +665,28 @@ export function parseFwp(html: string): FwpParseResult {
     calcBasis: extractDayCountBasis(text),
   };
 
+  // 나열식 서식은 "Optional Redemption"이 한 번만 나오므로 전체에서 한 번 뽑고,
+  // 상대표현("만기 N개월 전")이면 트랜치별 만기로 각각 날짜화한다.
+  const redemptionBase = extractRedemptionTerms(text, null);
+  const redemptionFor = (maturityDate: string | null): RedemptionTerms => {
+    if (
+      redemptionBase.parCallDate === null &&
+      redemptionBase.parCallMonthsBeforeMaturity !== null &&
+      maturityDate
+    ) {
+      const mat = new Date(maturityDate);
+      if (!Number.isNaN(mat.getTime())) {
+        return {
+          ...redemptionBase,
+          parCallDate: toDateString(
+            addMonths(mat, -redemptionBase.parCallMonthsBeforeMaturity)
+          ),
+        };
+      }
+    }
+    return redemptionBase;
+  };
+
   const tranches: BondTranche[] =
     trancheLabels.length > 0
       ? trancheLabels.map((label, i) => ({
@@ -557,6 +696,7 @@ export function parseFwp(html: string): FwpParseResult {
           isin: isins[i] ?? null,
           couponFrequencyMonths: extractCouponFrequencyMonths(text, label),
           ...shared,
+          ...redemptionFor(maturityDates[i] ?? null),
         }))
       : [
           {
@@ -566,6 +706,7 @@ export function parseFwp(html: string): FwpParseResult {
             isin: isins[0] ?? null,
             couponFrequencyMonths: extractCouponFrequencyMonths(text),
             ...shared,
+            ...redemptionFor(maturityDates[0] ?? null),
           },
         ];
 
@@ -615,7 +756,81 @@ export async function fetchFwpDetail(
     }
   }
 
+  // 콜조항(make-whole 스프레드·par call일)이 FWP에 없으면 같은 발행의 424B에서 찾는다.
+  if (
+    result.tranches.some(
+      (t) =>
+        t.makeWholeSpreadBps === null &&
+        t.parCallDate === null &&
+        t.parCallMonthsBeforeMaturity === null
+    )
+  ) {
+    const anyMaturity =
+      result.tranches.find((t) => t.maturityDate)?.maturityDate ?? null;
+    const terms = await findRedemptionTerms(cik, filedDate, anyMaturity).catch(
+      () => null
+    );
+    if (terms) {
+      for (const t of result.tranches) {
+        if (t.makeWholeSpreadBps === null) {
+          t.makeWholeSpreadBps = terms.makeWholeSpreadBps;
+        }
+        if (t.parCallDate === null && t.parCallMonthsBeforeMaturity === null) {
+          if (terms.parCallMonthsBeforeMaturity !== null && t.maturityDate) {
+            const mat = new Date(t.maturityDate);
+            if (!Number.isNaN(mat.getTime())) {
+              t.parCallDate = toDateString(
+                addMonths(mat, -terms.parCallMonthsBeforeMaturity)
+              );
+              t.parCallMonthsBeforeMaturity = terms.parCallMonthsBeforeMaturity;
+            }
+          } else {
+            t.parCallDate = terms.parCallDate;
+            t.parCallMonthsBeforeMaturity = terms.parCallMonthsBeforeMaturity;
+          }
+        }
+        if (!t.redemptionText && terms.redemptionText) {
+          t.redemptionText = terms.redemptionText;
+        }
+      }
+    }
+  }
+
   return result;
+}
+
+/**
+ * 같은 회사가 FWP와 비슷한 시점에 낸 424B(본 증권신고서 보충)에서 "Optional
+ * Redemption" 조항을 찾는다. findDayCountBasis와 동일한 구조 — 424B5는 보통
+ * FWP 1~2일 뒤 제출되므로 ±5일로 잡는다.
+ */
+export async function findRedemptionTerms(
+  cik: string,
+  fwpFiledDate: string,
+  maturityDate?: string | null
+): Promise<RedemptionTerms | null> {
+  const filings = await getFilings(cik, "424B", 10);
+  const target = filings.find((f) => {
+    if (!fwpFiledDate || !f.filedDate) return false;
+    const d1 = new Date(fwpFiledDate).getTime();
+    const d2 = new Date(f.filedDate).getTime();
+    return Math.abs(d1 - d2) <= 5 * 24 * 60 * 60 * 1000;
+  });
+  if (!target) return null;
+
+  const docUrl = await getPrimaryDocUrl(target.indexUrl);
+  if (!docUrl) return null;
+  const html = await fetchText(docUrl);
+  const text = htmlToText(html).replace(/\s+/g, " ");
+  const terms = extractRedemptionTerms(text, maturityDate ?? null);
+  if (
+    terms.makeWholeSpreadBps === null &&
+    terms.parCallDate === null &&
+    terms.parCallMonthsBeforeMaturity === null
+  ) {
+    return null;
+  }
+  return terms;
 }
 
 export interface BondListItem {

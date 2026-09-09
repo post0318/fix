@@ -3,6 +3,8 @@ import { CashFlowRow } from "@/lib/cashFlowSchedule";
 interface CashFlowTableProps {
   rows: CashFlowRow[] | null;
   custodyCurrency: string;
+  /** 콜 시나리오 캡션(만기보유면 null/undefined) */
+  scenarioNote?: string | null;
 }
 
 const HEAD_ROWS = 5;
@@ -20,7 +22,11 @@ function formatAmount(n: number, isKrw: boolean): string {
   });
 }
 
-export function CashFlowTable({ rows, custodyCurrency }: CashFlowTableProps) {
+export function CashFlowTable({
+  rows,
+  custodyCurrency,
+  scenarioNote,
+}: CashFlowTableProps) {
   const data = rows ?? [];
   const isKrw = custodyCurrency === "KRW";
   const hasSpecialTax = data.some((row) => row.specialTax !== null);
@@ -108,6 +114,12 @@ export function CashFlowTable({ rows, custodyCurrency }: CashFlowTableProps) {
       <h2 className="mb-5 print:mb-1 text-base font-semibold text-zinc-900 dark:text-zinc-100">
         현금흐름표
       </h2>
+
+      {scenarioNote && (
+        <p className="-mt-3 mb-4 print:mb-1 text-xs font-medium text-orange-700 dark:text-orange-400">
+          {scenarioNote}
+        </p>
+      )}
 
       {data.length === 0 ? (
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
