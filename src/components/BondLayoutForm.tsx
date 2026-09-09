@@ -63,8 +63,15 @@ function formatSettlementAmount(n: number, isKrw: boolean): string {
  */
 function applyFieldsWithCurrencySync(
   value: BondLayoutInput,
-  fields: Partial<BondLayoutInput>
+  incomingFields: Partial<BondLayoutInput>
 ): BondLayoutInput {
+  // 다른 종목을 반영해 만기일이 바뀌면, 이전 종목에 걸어둔 신탁만기일 수기
+  // 수정값은 무의미하므로 자동계산으로 되돌린다(검색 쪽이 값을 명시한 경우 제외).
+  const fields =
+    incomingFields.maturityDate !== undefined &&
+    incomingFields.trustMaturityDate === undefined
+      ? { ...incomingFields, trustMaturityDate: "" }
+      : incomingFields;
   const tradeCurrency = fields.tradeCurrency;
   if (!tradeCurrency) {
     return { ...value, ...fields };
@@ -338,6 +345,7 @@ export function BondLayoutForm({
         ? computeMaturitySummary(cashFlowRows, {
             trustContractDate: value.trustContractDate,
             maturityDate: value.maturityDate,
+            trustMaturityDate: value.trustMaturityDate,
             comprehensiveTaxRate: value.incomeTaxRate,
           })
         : null,
@@ -345,6 +353,7 @@ export function BondLayoutForm({
       cashFlowRows,
       value.trustContractDate,
       value.maturityDate,
+      value.trustMaturityDate,
       value.incomeTaxRate,
     ]
   );
@@ -362,7 +371,12 @@ export function BondLayoutForm({
         setUploadStatus("일치하는 항목을 찾지 못했습니다.");
         return;
       }
-      onChange({ ...value, ...parsed });
+      // 만기일이 새로 들어왔는데 신탁만기일이 파일에 없으면 자동계산으로 리셋.
+      const merged =
+        parsed.maturityDate !== undefined && parsed.trustMaturityDate === undefined
+          ? { ...value, ...parsed, trustMaturityDate: "" }
+          : { ...value, ...parsed };
+      onChange(merged);
       onLockedChange(true);
       setDisclosureRating(false);
       setUploadStatus(`${count}개 항목을 반영했습니다.`);
@@ -928,20 +942,45 @@ export function BondLayoutForm({
               onKeyDown={commitOnEnter}
             />
           </Row>
-          <Row label="신탁만기일">
-            {getTrustMaturityDate(value.maturityDate) ? (
-              <span className="text-sm text-zinc-900 dark:text-zinc-100">
-                {getTrustMaturityDate(value.maturityDate)}
-              </span>
-            ) : (
-              <ComputedValue />
-            )}
+          <Row label="신탁만기일" editable>
+            {(() => {
+              const autoDate = getTrustMaturityDate(value.maturityDate, "") ?? "";
+              const isOverridden = value.trustMaturityDate.trim() !== "";
+              if (!isOverridden && autoDate === "") return <ComputedValue />;
+              return (
+                <div className="flex w-full items-center gap-2">
+                  <input
+                    className={inputClass}
+                    type="date"
+                    value={isOverridden ? value.trustMaturityDate : autoDate}
+                    onChange={(e) =>
+                      update("trustMaturityDate", clampDateYear(e.target.value))
+                    }
+                    onKeyDown={commitOnEnter}
+                  />
+                  {isOverridden ? (
+                    <button
+                      type="button"
+                      onClick={() => update("trustMaturityDate", "")}
+                      className="shrink-0 rounded border border-zinc-300 px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-white dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 print:hidden"
+                    >
+                      자동
+                    </button>
+                  ) : (
+                    <span className="shrink-0 text-xs italic text-zinc-400 dark:text-zinc-600 print:hidden">
+                      자동
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
           </Row>
           <Row label="투자일수">
             {(() => {
               const days = getInvestmentDays(
                 value.trustContractDate,
-                value.maturityDate
+                value.maturityDate,
+                value.trustMaturityDate
               );
               return days !== null ? (
                 <span className="text-sm text-zinc-900 dark:text-zinc-100">

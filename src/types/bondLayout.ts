@@ -32,6 +32,8 @@ export interface BondLayoutInput {
   maturityFxRate: string;
 
   trustContractDate: string;
+  /** 신탁만기일 수기 수정값(YYYY-MM-DD). 빈 문자열이면 자동계산(만기일+11일). */
+  trustMaturityDate: string;
   purchaseYield: string;
 
   trustInvestmentAmount: string;

@@ -104,7 +104,19 @@ export function getCouponPeriod(
   return { previousCouponDate, nextCouponDate, periodsRemaining };
 }
 
-export function getTrustMaturityDate(maturityDate: string): string | null {
+/**
+ * 신탁만기일. 기본값은 만기일 + 11일이며, 이 값은 영업점에서 직접 수정할 수
+ * 있다. `override`가 유효한 날짜(YYYY-MM-DD)면 그 값을 그대로 쓰고, 비어
+ * 있거나 형식이 잘못되면 자동계산값(만기일+11일)으로 되돌아간다.
+ */
+export function getTrustMaturityDate(
+  maturityDate: string,
+  override?: string
+): string | null {
+  if (override && /^\d{1,4}-\d{2}-\d{2}$/.test(override)) {
+    const overridden = new Date(override);
+    if (!Number.isNaN(overridden.getTime())) return toDateString(overridden);
+  }
   const maturity = new Date(maturityDate);
   if (Number.isNaN(maturity.getTime())) return null;
   return toDateString(addDays(maturity, TRUST_MATURITY_LEAD_DAYS));
@@ -112,12 +124,13 @@ export function getTrustMaturityDate(maturityDate: string): string | null {
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
-/** 투자일수 = 신탁만기일 - 신탁계약일 (일) */
+/** 투자일수 = 신탁만기일 - 신탁계약일 (일). trustMaturityOverride가 있으면 그 값 기준. */
 export function getInvestmentDays(
   trustContractDate: string,
-  maturityDate: string
+  maturityDate: string,
+  trustMaturityOverride?: string
 ): number | null {
-  const trustMaturity = getTrustMaturityDate(maturityDate);
+  const trustMaturity = getTrustMaturityDate(maturityDate, trustMaturityOverride);
   if (!trustMaturity) return null;
 
   const contract = new Date(trustContractDate);

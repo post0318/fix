@@ -32,6 +32,7 @@ function createDefaultInput(): BondLayoutInput {
     purchaseFxRate: "1",
     maturityFxRate: "1",
     trustContractDate: todayDateString(),
+    trustMaturityDate: "",
     purchaseYield: "0.00",
     trustInvestmentAmount: "1000000",
     frontFeeRate: "0.00",

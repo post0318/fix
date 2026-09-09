@@ -78,6 +78,8 @@ const INVESTOR_TYPE_BY_CODE: Record<number, InvestorType> = {
   3: "금융법인",
 };
 
+// 최소 필드 수(하위호환). 신탁만기일이 21번째로 추가됐지만, 그 이전에
+// 생성된 20개짜리 링크도 계속 열 수 있도록 최소값은 20으로 유지한다.
 const FIELD_COUNT = 20;
 
 const MS_PER_DAY = 86400000;
@@ -116,7 +118,7 @@ function restoreDateDashes(compact: string): string {
 }
 
 /**
- * 화면 전체 입력값(20개 필드)을 "|" 구분 문자열로 압축한다. 링크를 열면
+ * 화면 전체 입력값(21개 필드)을 "|" 구분 문자열로 압축한다. 링크를 열면
  * 원본과 동일한 값으로 시작하고, 이후 영업점이 매수내역/상품수익률 항목을
  * 직접 수정하면 그때부터 달라진다. 코드값(이자지급주기/과세여부/날짜계산
  * 기준/통화/소득자구분)을 써서 JSON 키 이름 없이 값만 나열하므로 링크
@@ -144,6 +146,7 @@ function pack(value: BondLayoutInput): string {
     value.frontFeeRate,
     value.backFeeRate,
     value.incomeTaxRate,
+    stripDateDashes(value.trustMaturityDate),
   ];
   return fields.map((f) => (f ?? "").replace(/\|/g, " ")).join("|");
 }
@@ -173,6 +176,7 @@ function unpack(text: string): Partial<BondLayoutInput> | null {
     frontFeeRate,
     backFeeRate,
     incomeTaxRate,
+    trustMaturityDate,
   ] = parts;
 
   const result: Partial<BondLayoutInput> = {};
@@ -185,6 +189,7 @@ function unpack(text: string): Partial<BondLayoutInput> | null {
   if (purchaseFxRate) result.purchaseFxRate = purchaseFxRate;
   if (maturityFxRate) result.maturityFxRate = maturityFxRate;
   if (trustContractDate) result.trustContractDate = restoreDateDashes(trustContractDate);
+  if (trustMaturityDate) result.trustMaturityDate = restoreDateDashes(trustMaturityDate);
   if (purchaseYield) result.purchaseYield = purchaseYield;
   if (trustInvestmentAmount) result.trustInvestmentAmount = trustInvestmentAmount;
   if (frontFeeRate) result.frontFeeRate = frontFeeRate;

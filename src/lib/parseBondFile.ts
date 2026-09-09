@@ -14,6 +14,7 @@ type UploadableField =
   | "couponRate"
   | "couponFrequency"
   | "recentCouponDate"
+  | "trustMaturityDate"
   | "taxStatus"
   | "calcBasis"
   | "creditRating"
@@ -30,6 +31,7 @@ const LABEL_TO_FIELD: Record<string, UploadableField> = {
   "표면이율(%)": "couponRate",
   "이자지급 주기": "couponFrequency",
   최근이표일: "recentCouponDate",
+  신탁만기일: "trustMaturityDate",
   과세여부: "taxStatus",
   "날짜계산 기준": "calcBasis",
   신용등급: "creditRating",
@@ -150,7 +152,8 @@ export function parseBondFile(buffer: ArrayBuffer): Partial<BondLayoutInput> {
         } else if (
           field === "issueDate" ||
           field === "maturityDate" ||
-          field === "recentCouponDate"
+          field === "recentCouponDate" ||
+          field === "trustMaturityDate"
         ) {
           const iso = toIsoDate(valueCell.v);
           if (iso) {
