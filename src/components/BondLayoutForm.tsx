@@ -28,6 +28,7 @@ import {
 import {
   computeBondPricing,
   getEffectiveRedemption,
+  getMakeWholeDiscountHorizon,
 } from "@/lib/bondPricing";
 import { generateFixCashFlow } from "@/lib/cashFlowSchedule";
 import { computeMaturitySummary } from "@/lib/maturitySummary";
@@ -375,6 +376,7 @@ export function BondLayoutForm({
         couponFrequency: value.couponFrequency,
         calcBasis: value.calcBasis,
         tradeCurrency: value.tradeCurrency,
+        trustContractDate: value.trustContractDate,
       }),
     [
       value.hasCall,
@@ -388,8 +390,15 @@ export function BondLayoutForm({
       value.couponFrequency,
       value.calcBasis,
       value.tradeCurrency,
+      value.trustContractDate,
     ]
   );
+
+  // 콜 시나리오가 적용 중(hold가 아님)이면 신탁만기일 수기 override는 무시한다.
+  // override는 "만기일+11일" 기준으로 굳어 있어, 상환일이 만기와 달라지는
+  // 콜 상황에 그대로 쓰면 투자일수가 어긋난다(감사 #4).
+  const effectiveTrustMaturityOverride =
+    effectiveRedemption.applied === "hold" ? value.trustMaturityDate : "";
 
   const cashFlowRows = useMemo(
     () =>
@@ -450,7 +459,8 @@ export function BondLayoutForm({
             trustContractDate: value.trustContractDate,
             maturityDate: value.maturityDate,
             redemptionDate: effectiveRedemption.redemptionDate,
-            trustMaturityDate: value.trustMaturityDate,
+            trustMaturityDate: effectiveTrustMaturityOverride,
+            redemptionPriceFactor: effectiveRedemption.redemptionPriceFactor,
             comprehensiveTaxRate: value.incomeTaxRate,
           })
         : null,
@@ -459,22 +469,26 @@ export function BondLayoutForm({
       value.trustContractDate,
       value.maturityDate,
       effectiveRedemption.redemptionDate,
-      value.trustMaturityDate,
+      effectiveRedemption.redemptionPriceFactor,
+      effectiveTrustMaturityOverride,
       value.incomeTaxRate,
     ]
   );
 
-  // make-whole 기준 국채금리 자동채움: 국채곡선을 받아 (상환일~만기) 잔존만기로
-  // 보간해 makeWholeRefYield에 넣는다. 시나리오/상환일 변경 핸들러가 만든 다음
-  // 상태(next)를 그대로 받아, 같은 turn의 변경을 덮어쓰지 않는다.
+  // make-whole 기준 국채금리 자동채움: 국채곡선을 받아 (상환일~PV지평) 잔존만기로
+  // 보간해 makeWholeRefYield에 넣는다. PV지평은 par call일이 있으면 그 날짜다
+  // (make-whole 상환가 계산과 동일 기준 — 감사 #2). 시나리오/상환일 변경
+  // 핸들러가 만든 다음 상태(next)를 그대로 받아, 같은 turn의 변경을 덮어쓰지 않는다.
   const applyMakeWholeRate = async (next: BondLayoutInput, force: boolean) => {
     if (next.callScenario !== "makeWhole") return;
     if (!next.makeWholeRedemptionDate || !next.maturityDate) return;
     if (!force && next.makeWholeRefYield.trim() !== "") return;
-    const years = yearsBetweenIso(
-      next.makeWholeRedemptionDate,
-      next.maturityDate
+    const horizon = getMakeWholeDiscountHorizon(
+      next.maturityDate,
+      next.parCallDate,
+      next.makeWholeRedemptionDate
     );
+    const years = yearsBetweenIso(next.makeWholeRedemptionDate, horizon);
     if (years === null) return;
 
     let curve = treasuryCurve;
@@ -1091,30 +1105,43 @@ export function BondLayoutForm({
                   effectiveRedemption.redemptionDate || value.maturityDate,
                   ""
                 ) ?? "";
-              const isOverridden = value.trustMaturityDate.trim() !== "";
+              // 콜 시나리오 적용 중에는 override가 계산에 반영되지 않으므로
+              // (감사 #4) 표시도 자동값으로 되돌린다 — 입력값 자체는
+              // trustMaturityDate에 그대로 남아 hold로 돌아오면 복원된다.
+              const isOverridden = effectiveTrustMaturityOverride.trim() !== "";
+              const isSuspended =
+                !isOverridden && value.trustMaturityDate.trim() !== "";
               if (!isOverridden && autoDate === "") return <ComputedValue />;
               return (
-                <div className="flex w-full items-center gap-2">
-                  <input
-                    className={inputClass}
-                    type="date"
-                    value={isOverridden ? value.trustMaturityDate : autoDate}
-                    onChange={(e) =>
-                      update("trustMaturityDate", clampDateYear(e.target.value))
-                    }
-                    onKeyDown={commitOnEnter}
-                  />
-                  {isOverridden ? (
-                    <button
-                      type="button"
-                      onClick={() => update("trustMaturityDate", "")}
-                      className="shrink-0 rounded border border-zinc-300 px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-white dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 print:hidden"
-                    >
-                      자동
-                    </button>
-                  ) : (
-                    <span className="shrink-0 text-xs italic text-zinc-400 dark:text-zinc-600 print:hidden">
-                      자동
+                <div className="flex w-full flex-col gap-1">
+                  <div className="flex w-full items-center gap-2">
+                    <input
+                      className={inputClass}
+                      type="date"
+                      value={isOverridden ? value.trustMaturityDate : autoDate}
+                      onChange={(e) =>
+                        update("trustMaturityDate", clampDateYear(e.target.value))
+                      }
+                      onKeyDown={commitOnEnter}
+                    />
+                    {isOverridden ? (
+                      <button
+                        type="button"
+                        onClick={() => update("trustMaturityDate", "")}
+                        className="shrink-0 rounded border border-zinc-300 px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-white dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 print:hidden"
+                      >
+                        자동
+                      </button>
+                    ) : (
+                      <span className="shrink-0 text-xs italic text-zinc-400 dark:text-zinc-600 print:hidden">
+                        자동
+                      </span>
+                    )}
+                  </div>
+                  {isSuspended && (
+                    <span className="text-xs text-amber-600 dark:text-amber-500 print:hidden">
+                      콜 시나리오 적용 중에는 수기값이 무시되고 자동계산이
+                      쓰입니다.
                     </span>
                   )}
                 </div>
@@ -1126,7 +1153,7 @@ export function BondLayoutForm({
               const days = getInvestmentDays(
                 value.trustContractDate,
                 effectiveRedemption.redemptionDate || value.maturityDate,
-                value.trustMaturityDate
+                effectiveTrustMaturityOverride
               );
               return days !== null ? (
                 <span className="text-sm text-zinc-900 dark:text-zinc-100">

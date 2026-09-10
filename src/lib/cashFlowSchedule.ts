@@ -90,6 +90,8 @@ export function generateFixCashFlow(
   );
 
   // 콜/조기상환 시나리오. hold이면 redemption === maturity, 배수 1로 현행과 동일.
+  // trustContractDate(→결제일)를 넘겨 상환일이 결제일 이전인 입력(과거 콜일 등)은
+  // hold로 폴백하게 한다(감사 #3 — 하한 미검증 시 음수 이자/투자일수 발생).
   const eff = getEffectiveRedemption({
     hasCall: input.hasCall ?? false,
     callScenario: input.callScenario ?? "hold",
@@ -102,31 +104,54 @@ export function generateFixCashFlow(
     couponFrequency: input.couponFrequency,
     calcBasis: input.calcBasis,
     tradeCurrency: input.tradeCurrency,
+    trustContractDate: input.trustContractDate,
   });
   const redemption = new Date(eff.redemptionDate);
   if (Number.isNaN(redemption.getTime())) return null;
 
-  // 이자계산일 목록: 결제일 이후 첫 이표일부터 상환일(만기 또는 콜)까지.
-  // 상환일이 이표 그리드에 없으면(예: "만기 1개월 전" par call) 마지막 행은
-  // 상환일에 스텁(부분기간) 쿠폰 + 원금이 된다.
-  const dates: Date[] = [];
-  let cursor = addMonths(new Date(pricing.recentCouponDate), months);
-  while (toTime(cursor) < toTime(redemption)) {
-    dates.push(cursor);
-    cursor = addMonths(cursor, months);
+  // 이표일은 만기일 기준 anchored(만기에서 months×k개월씩 거슬러 올라간 날짜)로
+  // 만든다 — recentCouponDate에서 연쇄로 더해나가면 월말 만기(예: 8/31)에서
+  // 2월을 지나며 드리프트한다(감사 #5, getCouponPeriod/generateCouponSchedule과
+  // 동일 원칙 — 커밋 2187d27 참고). recentCouponDate 이후 ~ 상환일까지만 남긴다.
+  const recentCoupon = new Date(pricing.recentCouponDate);
+  const fullGrid: Date[] = [];
+  for (let k = 0; ; k++) {
+    const d = addMonths(maturity, -months * k);
+    if (d <= recentCoupon) break;
+    fullGrid.unshift(d);
   }
-  const redemptionOnGrid = toTime(cursor) === toTime(redemption);
-  const stubRedemption = !redemptionOnGrid;
-  dates.push(redemptionOnGrid ? cursor : new Date(redemption));
-  if (dates.length === 0) return null;
+
+  // 상환일이 이표 그리드에 없으면(예: "만기 1개월 전" par call) 마지막 행은
+  // 상환일에 스텁(부분기간) 쿠폰 + 원금이 되고, 그 다음 예정 이표일
+  // (nextGridCoupon)을 스텁 비율 계산의 분모 구간 끝으로 쓴다.
+  const dates: Date[] = [];
+  let stubRedemption = false;
+  let nextGridCoupon = redemption;
+  for (const d of fullGrid) {
+    const cmp = toTime(d) - toTime(redemption);
+    if (cmp < 0) {
+      dates.push(d);
+    } else if (cmp === 0) {
+      dates.push(d);
+      nextGridCoupon = d;
+      break;
+    } else {
+      nextGridCoupon = d;
+      stubRedemption = true;
+      dates.push(new Date(redemption));
+      break;
+    }
+  }
+  if (dates.length === 0) {
+    // fullGrid 전체가 상환일 이전(비정상 입력) — 상환일 자체를 스텁 1행으로.
+    stubRedemption = true;
+    dates.push(new Date(redemption));
+  }
 
   // 스텁 최종행의 쿠폰 비율 = (직전 이표일~상환일) / (직전 이표일~다음 예정 이표일).
   const basisIdx = BASIS_INDEX[input.calcBasis];
-  const prevGridCoupon =
-    dates.length >= 2
-      ? dates[dates.length - 2]
-      : new Date(pricing.recentCouponDate);
-  const fullPeriodFrac = yearFrac(prevGridCoupon, cursor, basisIdx);
+  const prevGridCoupon = dates.length >= 2 ? dates[dates.length - 2] : recentCoupon;
+  const fullPeriodFrac = yearFrac(prevGridCoupon, nextGridCoupon, basisIdx);
   const stubFraction =
     stubRedemption && fullPeriodFrac > 0
       ? yearFrac(prevGridCoupon, redemption, basisIdx) / fullPeriodFrac

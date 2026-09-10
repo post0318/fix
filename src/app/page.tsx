@@ -22,6 +22,7 @@ function scenarioNote(input: BondLayoutInput): string | null {
     couponFrequency: input.couponFrequency,
     calcBasis: input.calcBasis,
     tradeCurrency: input.tradeCurrency,
+    trustContractDate: input.trustContractDate,
   });
   if (eff.applied === "parCall") {
     return `시나리오: Par Call 행사 · ${eff.redemptionDate} 액면상환`;

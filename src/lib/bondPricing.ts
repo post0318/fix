@@ -528,6 +528,35 @@ export interface EffectiveRedemptionInput {
   couponFrequency: CouponFrequency;
   calcBasis: CalcBasis;
   tradeCurrency: string;
+  /** 상환일 하한 검증(결제일 이후여야 함)에 쓰인다. */
+  trustContractDate: string;
+}
+
+/**
+ * make-whole 상환가 계산의 PV 지평(="만기"로 가정하는 날짜). 프로스펙터스
+ * 표준 문구("assuming that such notes matured on the Par Call Date")대로,
+ * par call일이 상환일보다 뒤이고 실제 만기 이전이면 그 날짜를 쓰고, 아니면
+ * 실제 만기를 쓴다(감사 #2 — 만기까지 통째로 할인하면 프리미엄이 체계적으로
+ * 과대해짐). par call일이 실제 이표 그리드와 어긋나 있어도(예: "만기 1개월
+ * 전") 그대로 지평으로 쓰는 근사치다 — 참고용 추정임을 전제한다.
+ */
+export function getMakeWholeDiscountHorizon(
+  maturityDate: string,
+  parCallDate: string,
+  redemptionDate: string
+): string {
+  if (!parCallDate) return maturityDate;
+  const maturity = new Date(maturityDate);
+  const parCall = new Date(parCallDate);
+  const redemption = new Date(redemptionDate);
+  if (
+    Number.isNaN(maturity.getTime()) ||
+    Number.isNaN(parCall.getTime()) ||
+    Number.isNaN(redemption.getTime())
+  ) {
+    return maturityDate;
+  }
+  return parCall > redemption && parCall <= maturity ? parCallDate : maturityDate;
 }
 
 export interface EffectiveRedemption {
@@ -561,9 +590,15 @@ export function getEffectiveRedemption(
   if (Number.isNaN(maturity.getTime())) return hold;
   if (!input.hasCall || input.callScenario === "hold") return hold;
 
+  // 상환일 하한 = 결제일. 하한 미검증이면 과거 콜일 입력 시 음수 이자·음수
+  // 투자일수가 나온다(감사 #3). 결제일을 못 구하면 검증 없이 콜을 인정하지
+  // 않고 hold로 폴백한다.
+  const settlement = getSettlementDate(input.trustContractDate, input.calcBasis);
+  if (!settlement) return hold;
+
   if (input.callScenario === "parCall") {
     const d = new Date(input.parCallDate);
-    if (Number.isNaN(d.getTime()) || d >= maturity) return hold;
+    if (Number.isNaN(d.getTime()) || d >= maturity || d <= settlement) return hold;
     return {
       redemptionDate: input.parCallDate,
       redemptionPriceFactor: 1,
@@ -580,6 +615,7 @@ export function getEffectiveRedemption(
   if (
     Number.isNaN(d.getTime()) ||
     d >= maturity ||
+    d <= settlement ||
     !input.makeWholeRefYield ||
     Number.isNaN(refYield) ||
     !input.makeWholeSpreadBps ||
@@ -595,9 +631,17 @@ export function getEffectiveRedemption(
     : input.tradeCurrency === "KRW"
       ? 10000
       : 100;
+  // PV 지평은 par call일이 있으면 그 날을 "만기"로 가정한다(감사 #2).
+  const horizon = new Date(
+    getMakeWholeDiscountHorizon(
+      input.maturityDate,
+      input.parCallDate,
+      input.makeWholeRedemptionDate
+    )
+  );
   const price = computeMakeWholePrice(
     d,
-    maturity,
+    horizon,
     rate / 100,
     refYield / 100,
     spreadBps,

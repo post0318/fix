@@ -14,6 +14,12 @@ export interface MaturitySummaryInputs {
   redemptionDate?: string;
   /** 신탁만기일 수기 수정값. 있으면 투자일수가 이 값 기준으로 산출된다. */
   trustMaturityDate?: string;
+  /**
+   * 콜 시나리오의 원금상환 배수(1=액면, >1=make-whole 프리미엄). 수익률의
+   * 분모(액면기준 원금)를 원금 합계에서 프리미엄을 분리해 구하는 데 쓰인다.
+   * 없거나 1이면 원금 합계를 그대로 분모로 쓴다(기존 동작과 동일).
+   */
+  redemptionPriceFactor?: number;
   comprehensiveTaxRate: string;
 }
 
@@ -56,12 +62,22 @@ export function computeMaturitySummary(
   const preTaxMaturityAmount = roundDown(totalPrincipal + totalInterest, 2);
   const postTaxMaturityAmount = roundDown(totalPrincipal + totalNetAmount, 2);
 
+  // 수익률의 분모는 액면기준 원금(프리미엄 제외)이어야 한다. make-whole
+  // 프리미엄은 totalPrincipal에 이미 포함돼 있는데, 분모를 totalPrincipal
+  // 그대로 쓰면 분자(만기시금액-원금)에서 프리미엄이 상쇄돼 "프리미엄이
+  // 클수록 표시 수익률이 낮아지는" 부호 오류가 난다(감사 #1). 배수로
+  // 나눠 액면기준 원금을 복원하고, 프리미엄은 분자(수익)에 남긴다.
+  const factor =
+    input.redemptionPriceFactor && input.redemptionPriceFactor > 0
+      ? input.redemptionPriceFactor
+      : 1;
+  const yieldBase = factor !== 1 ? totalPrincipal / factor : totalPrincipal;
+  if (!(yieldBase > 0)) return null;
+
   const preTaxYield =
-    ((preTaxMaturityAmount - totalPrincipal) / totalPrincipal) *
-    (365 / investmentDays);
+    ((preTaxMaturityAmount - yieldBase) / yieldBase) * (365 / investmentDays);
   const postTaxYield =
-    ((postTaxMaturityAmount - totalPrincipal) / totalPrincipal) *
-    (365 / investmentDays);
+    ((postTaxMaturityAmount - yieldBase) / yieldBase) * (365 / investmentDays);
 
   const parsedComprehensiveTaxRate = Number(input.comprehensiveTaxRate);
   const comprehensiveTaxRate =
