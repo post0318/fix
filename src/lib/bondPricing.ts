@@ -530,6 +530,10 @@ export interface EffectiveRedemptionInput {
   tradeCurrency: string;
   /** 상환일 하한 검증(결제일 이후여야 함)에 쓰인다. */
   trustContractDate: string;
+  /** 풋옵션(투자자 조기상환청구권) 존재 여부. */
+  hasPut: boolean;
+  /** 풋옵션 행사일(YYYY-MM-DD). 상환가는 액면(100%) 고정 가정. */
+  putDate: string;
 }
 
 /**
@@ -588,15 +592,16 @@ export function getEffectiveRedemption(
 
   const maturity = new Date(input.maturityDate);
   if (Number.isNaN(maturity.getTime())) return hold;
-  if (!input.hasCall || input.callScenario === "hold") return hold;
+  if (input.callScenario === "hold") return hold;
 
-  // 상환일 하한 = 결제일. 하한 미검증이면 과거 콜일 입력 시 음수 이자·음수
-  // 투자일수가 나온다(감사 #3). 결제일을 못 구하면 검증 없이 콜을 인정하지
-  // 않고 hold로 폴백한다.
+  // 상환일 하한 = 결제일. 하한 미검증이면 과거 콜/풋일 입력 시 음수 이자·음수
+  // 투자일수가 나온다(감사 #3). 결제일을 못 구하면 검증 없이 인정하지 않고
+  // hold로 폴백한다.
   const settlement = getSettlementDate(input.trustContractDate, input.calcBasis);
   if (!settlement) return hold;
 
   if (input.callScenario === "parCall") {
+    if (!input.hasCall) return hold;
     const d = new Date(input.parCallDate);
     if (Number.isNaN(d.getTime()) || d >= maturity || d <= settlement) return hold;
     return {
@@ -607,7 +612,21 @@ export function getEffectiveRedemption(
     };
   }
 
+  if (input.callScenario === "put") {
+    // 풋옵션(투자자 조기상환청구권) 행사 — par call과 동일하게 액면(100%) 상환.
+    if (!input.hasPut) return hold;
+    const d = new Date(input.putDate);
+    if (Number.isNaN(d.getTime()) || d >= maturity || d <= settlement) return hold;
+    return {
+      redemptionDate: input.putDate,
+      redemptionPriceFactor: 1,
+      makeWholePricePer100: null,
+      applied: "put",
+    };
+  }
+
   // makeWhole
+  if (!input.hasCall) return hold;
   const d = new Date(input.makeWholeRedemptionDate);
   const refYield = Number(input.makeWholeRefYield);
   const spreadBps = Number(input.makeWholeSpreadBps);

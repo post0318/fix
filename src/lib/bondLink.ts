@@ -16,11 +16,13 @@ const CALL_SCENARIO_TO_CODE: Record<CallScenario, number> = {
   hold: 0,
   parCall: 1,
   makeWhole: 2,
+  put: 3,
 };
 const CALL_SCENARIO_BY_CODE: Record<number, CallScenario> = {
   0: "hold",
   1: "parCall",
   2: "makeWhole",
+  3: "put",
 };
 
 const COUPON_FREQUENCY_TO_CODE: Record<CouponFrequency, number> = {
@@ -130,7 +132,7 @@ function restoreDateDashes(compact: string): string {
 }
 
 /**
- * 화면 전체 입력값(21개 필드)을 "|" 구분 문자열로 압축한다. 링크를 열면
+ * 화면 전체 입력값(24개 필드)을 "|" 구분 문자열로 압축한다. 링크를 열면
  * 원본과 동일한 값으로 시작하고, 이후 영업점이 매수내역/상품수익률 항목을
  * 직접 수정하면 그때부터 달라진다. 코드값(이자지급주기/과세여부/날짜계산
  * 기준/통화/소득자구분)을 써서 JSON 키 이름 없이 값만 나열하므로 링크
@@ -165,6 +167,9 @@ function pack(value: BondLayoutInput): string {
     String(CALL_SCENARIO_TO_CODE[value.callScenario] ?? 0),
     stripDateDashes(value.makeWholeRedemptionDate),
     value.makeWholeRefYield,
+    value.isin,
+    value.hasPut ? "1" : "",
+    stripDateDashes(value.putDate),
   ];
   return fields.map((f) => (f ?? "").replace(/\|/g, " ")).join("|");
 }
@@ -201,6 +206,9 @@ function unpack(text: string): Partial<BondLayoutInput> | null {
     callScenarioCode,
     makeWholeRedemptionDate,
     makeWholeRefYield,
+    isin,
+    hasPut,
+    putDate,
   ] = parts;
 
   const result: Partial<BondLayoutInput> = {};
@@ -220,6 +228,9 @@ function unpack(text: string): Partial<BondLayoutInput> | null {
   if (makeWholeRedemptionDate)
     result.makeWholeRedemptionDate = restoreDateDashes(makeWholeRedemptionDate);
   if (makeWholeRefYield) result.makeWholeRefYield = makeWholeRefYield;
+  if (isin) result.isin = isin;
+  if (hasPut === "1") result.hasPut = true;
+  if (putDate) result.putDate = restoreDateDashes(putDate);
   if (callScenarioCode) {
     const scenario = CALL_SCENARIO_BY_CODE[Number(callScenarioCode)];
     if (scenario) result.callScenario = scenario;

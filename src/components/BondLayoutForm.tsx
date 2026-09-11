@@ -83,6 +83,9 @@ function clearedCallFields(
   if (incoming.makeWholeRedemptionDate === undefined)
     cleared.makeWholeRedemptionDate = "";
   if (incoming.makeWholeRefYield === undefined) cleared.makeWholeRefYield = "";
+  if (incoming.isin === undefined) cleared.isin = "";
+  if (incoming.hasPut === undefined) cleared.hasPut = false;
+  if (incoming.putDate === undefined) cleared.putDate = "";
   return cleared;
 }
 
@@ -229,6 +232,7 @@ const CALL_SCENARIO_LABELS: { value: CallScenario; label: string }[] = [
   { value: "hold", label: "만기보유" },
   { value: "parCall", label: "Par Call 행사" },
   { value: "makeWhole", label: "Make-Whole 상환" },
+  { value: "put", label: "풋옵션 행사" },
 ];
 
 /** 선취보수(차감) = 신탁투자금액 x 선취보수율 */
@@ -323,6 +327,8 @@ export function BondLayoutForm({
   const [disclosureRating, setDisclosureRating] = useState(false);
   const [treasuryCurve, setTreasuryCurve] = useState<YieldCurve | null>(null);
   const [treasuryStatus, setTreasuryStatus] = useState<string | null>(null);
+  // 콜/풋 체크박스 재조회(검색 없이 켤 때, 또는 "다시 확인") 상태 문구.
+  const [callPutStatus, setCallPutStatus] = useState<string | null>(null);
 
   const update = <K extends keyof BondLayoutInput>(
     key: K,
@@ -377,6 +383,8 @@ export function BondLayoutForm({
         calcBasis: value.calcBasis,
         tradeCurrency: value.tradeCurrency,
         trustContractDate: value.trustContractDate,
+        hasPut: value.hasPut,
+        putDate: value.putDate,
       }),
     [
       value.hasCall,
@@ -391,6 +399,8 @@ export function BondLayoutForm({
       value.calcBasis,
       value.tradeCurrency,
       value.trustContractDate,
+      value.hasPut,
+      value.putDate,
     ]
   );
 
@@ -425,6 +435,8 @@ export function BondLayoutForm({
         makeWholeRedemptionDate: value.makeWholeRedemptionDate,
         makeWholeRefYield: value.makeWholeRefYield,
         makeWholeSpreadBps: value.makeWholeSpreadBps,
+        hasPut: value.hasPut,
+        putDate: value.putDate,
       }),
     [
       value.maturityDate,
@@ -449,6 +461,8 @@ export function BondLayoutForm({
       value.makeWholeRedemptionDate,
       value.makeWholeRefYield,
       value.makeWholeSpreadBps,
+      value.hasPut,
+      value.putDate,
     ]
   );
 
@@ -511,6 +525,72 @@ export function BondLayoutForm({
       `${curve.date} 국채곡선 · 잔존 ${years.toFixed(1)}년 보간값`
     );
     onChange({ ...next, makeWholeRefYield: rate.toFixed(3) });
+  };
+
+  // 콜/풋 체크박스 재조회: 검색을 거치지 않고 체크박스를 켤 때(또는 "다시
+  // 확인" 클릭 시) 이미 반영된 ISIN으로 공시서류를 다시 조회한다. next를
+  // 받아 한 번의 onChange로 반영해 동시 입력을 덮어쓰지 않는다.
+  const verifyCallPutTerms = async (
+    next: BondLayoutInput,
+    kind: "call" | "put"
+  ) => {
+    const label = kind === "call" ? "콜조항" : "풋옵션";
+    if (!next.isin) {
+      setCallPutStatus(
+        `자동확인 불가 — ISIN 정보가 없어 ${label}을(를) 직접 입력해 주세요.`
+      );
+      return;
+    }
+    setCallPutStatus("공시서류 확인 중...");
+    try {
+      const res = await fetch(
+        `/api/us-bond-terms?isin=${encodeURIComponent(next.isin)}`
+      );
+      const data = (await res.json()) as {
+        found?: boolean;
+        tranche?: {
+          parCallDate: string | null;
+          makeWholeSpreadBps: number | null;
+          putDate: string | null;
+        };
+      };
+      if (!res.ok || !data.found || !data.tranche) {
+        setCallPutStatus(
+          `자동확인 불가 — 공시서류를 찾지 못했습니다. ${label}을(를) 직접 입력해 주세요.`
+        );
+        return;
+      }
+      const t = data.tranche;
+      if (kind === "call") {
+        const confirmed = t.parCallDate !== null || t.makeWholeSpreadBps !== null;
+        if (!confirmed) {
+          onChange({ ...next, hasCall: false });
+          setCallPutStatus("공시서류를 확인했으나 콜조항이 없는 것으로 확인됩니다.");
+          return;
+        }
+        onChange({
+          ...next,
+          parCallDate: t.parCallDate ?? next.parCallDate,
+          makeWholeSpreadBps:
+            t.makeWholeSpreadBps != null
+              ? String(t.makeWholeSpreadBps)
+              : next.makeWholeSpreadBps,
+        });
+        setCallPutStatus("공시서류에서 콜조항을 확인해 반영했습니다.");
+      } else {
+        if (t.putDate === null) {
+          onChange({ ...next, hasPut: false });
+          setCallPutStatus("공시서류를 확인했으나 풋옵션이 없는 것으로 확인됩니다.");
+          return;
+        }
+        onChange({ ...next, putDate: t.putDate });
+        setCallPutStatus("공시서류에서 풋옵션을 확인해 반영했습니다.");
+      }
+    } catch {
+      setCallPutStatus(
+        `자동확인 중 오류가 발생했습니다. ${label}을(를) 직접 입력해 주세요.`
+      );
+    }
   };
 
   const handleUpload = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -1286,20 +1366,28 @@ export function BondLayoutForm({
           </Row>
         </GroupCard>
 
-        <GroupCard title="콜 / 조기상환">
+        <GroupCard title="콜 / 풋 옵션">
           <Row label="콜조항" editable>
             <label className="flex items-center gap-2 text-sm text-zinc-900 dark:text-zinc-100">
               <input
                 type="checkbox"
                 className="h-4 w-4 accent-orange-600"
                 checked={value.hasCall}
-                onChange={(e) =>
-                  onChange({
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  const next = {
                     ...value,
-                    hasCall: e.target.checked,
-                    callScenario: e.target.checked ? value.callScenario : "hold",
-                  })
-                }
+                    hasCall: checked,
+                    callScenario:
+                      !checked &&
+                      (value.callScenario === "parCall" ||
+                        value.callScenario === "makeWhole")
+                        ? ("hold" as CallScenario)
+                        : value.callScenario,
+                  };
+                  onChange(next);
+                  if (checked) void verifyCallPutTerms(next, "call");
+                }}
               />
               <span>{value.hasCall ? "있음" : "없음"}</span>
             </label>
@@ -1334,9 +1422,64 @@ export function BondLayoutForm({
                   onKeyDown={commitOnEnter}
                 />
               </Row>
+            </>
+          )}
+
+          <Row label="풋옵션" editable>
+            <label className="flex items-center gap-2 text-sm text-zinc-900 dark:text-zinc-100">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-orange-600"
+                checked={value.hasPut}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  const next = {
+                    ...value,
+                    hasPut: checked,
+                    callScenario:
+                      !checked && value.callScenario === "put"
+                        ? ("hold" as CallScenario)
+                        : value.callScenario,
+                  };
+                  onChange(next);
+                  if (checked) void verifyCallPutTerms(next, "put");
+                }}
+              />
+              <span>{value.hasPut ? "있음" : "없음"}</span>
+            </label>
+          </Row>
+
+          {value.hasPut && (
+            <Row label="풋옵션 행사일" editable>
+              <input
+                className={inputClass}
+                type="date"
+                value={value.putDate}
+                onChange={(e) => update("putDate", clampDateYear(e.target.value))}
+                onKeyDown={commitOnEnter}
+              />
+            </Row>
+          )}
+
+          {callPutStatus && (
+            <Row label="">
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                {callPutStatus}
+              </span>
+            </Row>
+          )}
+
+          {(value.hasCall || value.hasPut) && (
+            <>
               <Row label="시나리오" editable>
                 <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  {CALL_SCENARIO_LABELS.map((opt) => (
+                  {CALL_SCENARIO_LABELS.filter(
+                    (opt) =>
+                      opt.value === "hold" ||
+                      ((opt.value === "parCall" || opt.value === "makeWhole") &&
+                        value.hasCall) ||
+                      (opt.value === "put" && value.hasPut)
+                  ).map((opt) => (
                     <label
                       key={opt.value}
                       className="flex items-center gap-1.5 text-sm text-zinc-900 dark:text-zinc-100"
@@ -1429,8 +1572,8 @@ export function BondLayoutForm({
                 effectiveRedemption.applied === "hold" && (
                   <Row label="">
                     <span className="text-xs text-amber-600 dark:text-amber-500">
-                      시나리오 입력(상환일·스프레드·기준금리)이 부족해 만기보유로
-                      계산 중입니다.
+                      시나리오 입력(상환일·스프레드·기준금리 등)이 부족하거나
+                      결제일 이전 날짜라 만기보유로 계산 중입니다.
                     </span>
                   </Row>
                 )}

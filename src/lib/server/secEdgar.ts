@@ -245,6 +245,10 @@ const KNOWN_LABELS = [
   "Interest Payment Record Dates:",
   "Optional Redemption:",
   "Redemption:",
+  "Optional Repayment Date(s):",
+  "Optional Repayment Date:",
+  "Repayment Date(s):",
+  "Repayment Price:",
   "Net Proceeds:",
   "Joint Book-Running Managers:",
   "Sole Book-Running Manager:",
@@ -283,6 +287,10 @@ export interface BondTranche {
   makeWholeSpreadBps: number | null;
   /** "Optional Redemption" 섹션 앞부분(표시/디버그용). */
   redemptionText: string | null;
+  /** 풋옵션(투자자 조기상환청구권) 행사일. 상환가는 액면(100%) 고정 가정. */
+  putDate: string | null;
+  /** 풋옵션 관련 원문 발췌(표시/디버그용). */
+  putText: string | null;
 }
 
 export interface RedemptionTerms {
@@ -298,6 +306,36 @@ const EMPTY_REDEMPTION: RedemptionTerms = {
   makeWholeSpreadBps: null,
   redemptionText: null,
 };
+
+export interface PutTerms {
+  putDate: string | null;
+  putText: string | null;
+}
+
+const EMPTY_PUT: PutTerms = { putDate: null, putText: null };
+
+/**
+ * MTN 프로그램(Toyota Motor Credit·PACCAR Financial 등)의 FWP는 풋옵션을
+ * "Optional Repayment Date(s):" 같은 라벨 필드로 담는다 — 옵션이 없으면
+ * 필드 자체가 문서에 없다(실제 확인: PACCAR FWP는 "may not be repaid ...
+ * at the option of the holder"만 있고 날짜 필드가 없음). 그래서 라벨
+ * 부재만으로 "풋 없음"을 신뢰할 수 있어, 콜과 달리 문서 전체를 훑는 폴백
+ * 정규식은 두지 않는다(오탐 위험 대신 미탐을 택함 — 드문 조항이라 미탐이
+ * 더 안전). "Change of Control" 상환청구권(계약 트리거형, 일정과 무관)은
+ * 이 라벨들과 겹치지 않아 자연히 걸러진다.
+ */
+function extractPutTerms(text: string): PutTerms {
+  const raw =
+    section(text, "Optional Repayment Date(s):", otherLabels("Optional Repayment Date(s):")) ??
+    section(text, "Optional Repayment Date:", otherLabels("Optional Repayment Date:")) ??
+    section(text, "Repayment Date(s):", otherLabels("Repayment Date(s):")) ??
+    null;
+  if (!raw) return EMPTY_PUT;
+  const dateMatch = raw.match(/[A-Za-z]+ \d{1,2},\s*\d{4}/);
+  const putDate = dateMatch ? parseUsDate(dateMatch[0]) : null;
+  if (!putDate) return EMPTY_PUT;
+  return { putDate, putText: raw.slice(0, 240).replace(/\s+/g, " ").trim() };
+}
 
 /**
  * FWP/424B의 "Optional Redemption" 조항에서 make-whole 스프레드와 par call일을
@@ -578,6 +616,7 @@ function parseTrancheBlock(block: string): Omit<BondTranche, "label"> {
     settlementDate: extractSettlementDate(block),
     calcBasis: extractDayCountBasis(block),
     ...extractRedemptionTerms(block, maturityDate),
+    ...extractPutTerms(block),
   };
 }
 
@@ -686,6 +725,8 @@ export function parseFwp(html: string): FwpParseResult {
     }
     return redemptionBase;
   };
+  // 풋옵션은 상대표현이 없어(항상 명시적 날짜) 트랜치 간 공유해도 무방하다.
+  const putTerms = extractPutTerms(text);
 
   const tranches: BondTranche[] =
     trancheLabels.length > 0
@@ -697,6 +738,7 @@ export function parseFwp(html: string): FwpParseResult {
           couponFrequencyMonths: extractCouponFrequencyMonths(text, label),
           ...shared,
           ...redemptionFor(maturityDates[i] ?? null),
+          ...putTerms,
         }))
       : [
           {
@@ -707,6 +749,7 @@ export function parseFwp(html: string): FwpParseResult {
             couponFrequencyMonths: extractCouponFrequencyMonths(text),
             ...shared,
             ...redemptionFor(maturityDates[0] ?? null),
+            ...putTerms,
           },
         ];
 
@@ -796,6 +839,19 @@ export async function fetchFwpDetail(
     }
   }
 
+  // 풋옵션(투자자 조기상환청구권)도 FWP에 없으면 같은 발행의 424B에서 찾는다.
+  if (result.tranches.some((t) => t.putDate === null)) {
+    const putTerms = await findPutTerms(cik, filedDate).catch(() => null);
+    if (putTerms) {
+      for (const t of result.tranches) {
+        if (t.putDate === null) {
+          t.putDate = putTerms.putDate;
+          t.putText = putTerms.putText;
+        }
+      }
+    }
+  }
+
   return result;
 }
 
@@ -831,6 +887,31 @@ export async function findRedemptionTerms(
     return null;
   }
   return terms;
+}
+
+/**
+ * findRedemptionTerms와 동일 구조로, 같은 424B에서 풋옵션(투자자 조기상환
+ * 청구권)을 찾는다.
+ */
+export async function findPutTerms(
+  cik: string,
+  fwpFiledDate: string
+): Promise<PutTerms | null> {
+  const filings = await getFilings(cik, "424B", 10);
+  const target = filings.find((f) => {
+    if (!fwpFiledDate || !f.filedDate) return false;
+    const d1 = new Date(fwpFiledDate).getTime();
+    const d2 = new Date(f.filedDate).getTime();
+    return Math.abs(d1 - d2) <= 5 * 24 * 60 * 60 * 1000;
+  });
+  if (!target) return null;
+
+  const docUrl = await getPrimaryDocUrl(target.indexUrl);
+  if (!docUrl) return null;
+  const html = await fetchText(docUrl);
+  const text = htmlToText(html).replace(/\s+/g, " ");
+  const terms = extractPutTerms(text);
+  return terms.putDate === null ? null : terms;
 }
 
 export interface BondListItem {
@@ -953,6 +1034,23 @@ export async function findBondByIsin(cik: string, isin: string): Promise<BondTra
   if (!found) return null;
   const detail = await fetchFwpDetail(found.indexUrl, found.cik, found.filedDate);
   return detail.tranches.find((t) => t.isin === isin) ?? null;
+}
+
+/**
+ * 화면의 콜/풋 체크박스 재조회용 — cik 없이 ISIN만으로 콜/풋 조항을 다시
+ * 조회한다. 미국채권검색을 거치지 않고 체크박스만 켰을 때 쓰인다.
+ * `findFwpByIsinFullText`(cik 후보 목록 스캔 없이 EDGAR 전문검색으로 바로
+ * 찾음)로 문서를 찾고, `fetchFwpDetail`(day-count·콜·풋 424B 폴백 전부 포함)
+ * 로 상세 조회한다. 문서 자체를 못 찾으면 null("확인 불가" — "조항 없음
+ * 확인됨"과는 다르게 취급해야 한다).
+ */
+export async function findCallPutTermsByIsin(
+  isin: string
+): Promise<BondTranche | null> {
+  const found = await findFwpByIsinFullText(isin);
+  if (!found) return null;
+  const detail = await fetchFwpDetail(found.indexUrl, found.cik, found.filedDate);
+  return detail.tranches.find((t) => t.isin === isin) ?? detail.tranches[0] ?? null;
 }
 
 /** 같은 회사가 FWP와 비슷한 시점에 낸 424B(본 증권신고서)에서 day-count 관용구를 찾는다 */

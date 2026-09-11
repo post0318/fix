@@ -23,6 +23,8 @@ function scenarioNote(input: BondLayoutInput): string | null {
     calcBasis: input.calcBasis,
     tradeCurrency: input.tradeCurrency,
     trustContractDate: input.trustContractDate,
+    hasPut: input.hasPut,
+    putDate: input.putDate,
   });
   if (eff.applied === "parCall") {
     return `시나리오: Par Call 행사 · ${eff.redemptionDate} 액면상환`;
@@ -32,6 +34,9 @@ function scenarioNote(input: BondLayoutInput): string | null {
     return `시나리오: Make-Whole 상환 · ${eff.redemptionDate}${
       px != null ? ` · 상환가 ${px.toFixed(3)} (참고용 추정)` : ""
     }`;
+  }
+  if (eff.applied === "put") {
+    return `시나리오: 풋옵션 행사 · ${eff.redemptionDate} 액면상환`;
   }
   return null;
 }
@@ -73,6 +78,9 @@ function createDefaultInput(): BondLayoutInput {
     callScenario: "hold",
     makeWholeRedemptionDate: "",
     makeWholeRefYield: "",
+    isin: "",
+    hasPut: false,
+    putDate: "",
   };
 }
 
@@ -119,6 +127,8 @@ export default function Home() {
         makeWholeRedemptionDate: input.makeWholeRedemptionDate,
         makeWholeRefYield: input.makeWholeRefYield,
         makeWholeSpreadBps: input.makeWholeSpreadBps,
+        hasPut: input.hasPut,
+        putDate: input.putDate,
       }),
     [
       input.maturityDate,
@@ -143,6 +153,8 @@ export default function Home() {
       input.makeWholeRedemptionDate,
       input.makeWholeRefYield,
       input.makeWholeSpreadBps,
+      input.hasPut,
+      input.putDate,
     ]
   );
 

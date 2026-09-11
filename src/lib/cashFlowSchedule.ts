@@ -46,14 +46,16 @@ export interface CashFlowScheduleInputs {
   investorType: InvestorType;
   taxStatus: TaxStatus;
 
-  // 콜/조기상환 시나리오. 모두 생략 가능하며, hasCall이 false이거나 시나리오
-  // 입력이 불완전하면 만기보유(hold)로 계산된다.
+  // 콜/풋/조기상환 시나리오. 모두 생략 가능하며, hasCall/hasPut이 false이거나
+  // 시나리오 입력이 불완전하면 만기보유(hold)로 계산된다.
   hasCall?: boolean;
   callScenario?: CallScenario;
   parCallDate?: string;
   makeWholeRedemptionDate?: string;
   makeWholeRefYield?: string;
   makeWholeSpreadBps?: string;
+  hasPut?: boolean;
+  putDate?: string;
 }
 
 function daysBetween(a: Date, b: Date): number {
@@ -105,6 +107,8 @@ export function generateFixCashFlow(
     calcBasis: input.calcBasis,
     tradeCurrency: input.tradeCurrency,
     trustContractDate: input.trustContractDate,
+    hasPut: input.hasPut ?? false,
+    putDate: input.putDate ?? "",
   });
   const redemption = new Date(eff.redemptionDate);
   if (Number.isNaN(redemption.getTime())) return null;
