@@ -469,23 +469,27 @@ export function BondLayoutForm({
 
   const maturitySummary = useMemo(
     () =>
-      cashFlowRows
+      cashFlowRows && pricing
         ? computeMaturitySummary(cashFlowRows, {
             trustContractDate: value.trustContractDate,
             maturityDate: value.maturityDate,
             redemptionDate: effectiveRedemption.redemptionDate,
             trustMaturityDate: value.trustMaturityDate,
-            redemptionPriceFactor: effectiveRedemption.redemptionPriceFactor,
+            trustInvestmentAmount: value.trustInvestmentAmount,
+            backFeeRate: value.backFeeRate,
+            cashBalance: pricing.cashBalance,
             comprehensiveTaxRate: value.incomeTaxRate,
           })
         : null,
     [
       cashFlowRows,
+      pricing,
       value.trustContractDate,
       value.maturityDate,
       effectiveRedemption.redemptionDate,
-      effectiveRedemption.redemptionPriceFactor,
       value.trustMaturityDate,
+      value.trustInvestmentAmount,
+      value.backFeeRate,
       value.incomeTaxRate,
     ]
   );
