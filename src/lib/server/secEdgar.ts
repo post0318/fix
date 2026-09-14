@@ -349,11 +349,121 @@ function extractRedemptionTerms(
   text: string,
   maturityDate?: string | null
 ): RedemptionTerms {
-  const raw =
+  const raw = findRedemptionSection(text);
+  return parseRedemptionSource(raw ?? text, raw !== null, maturityDate ?? null);
+}
+
+/** "Optional Redemption:"(또는 "Redemption:") 섹션 본문. 없으면 null. */
+function findRedemptionSection(text: string): string | null {
+  return (
     section(text, "Optional Redemption:", otherLabels("Optional Redemption:")) ??
     section(text, "Redemption:", otherLabels("Redemption:")) ??
-    "";
-  const source = raw || text;
+    null
+  );
+}
+
+/**
+ * 문장 단위 분할. "U.S." 같은 한 글자 약어 뒤 마침표는 경계로 보지 않는다.
+ * 다음 문장이 숫자로 시작하는 경우("... 2030. 2032 Notes: ...")도 경계로
+ * 보고, 텀시트가 "YYYY Notes:" 라벨로 트랜치 절을 시작하는 서식(실제 확인:
+ * Meta 2025-10-30 — 각 트랜치 조건이 "2032 Notes: At any time prior to …"로
+ * 이어짐)은 그 라벨 앞에서도 나눈다. (텍스트는 htmlToText 후 공백이 한 칸으로
+ * 정규화된 상태.)
+ */
+function splitSentences(text: string): string[] {
+  return text
+    .split(/(?<!\b[A-Z])\.\s+(?=[A-Z0-9(])|(?=\b(?:19|20)\d{2}\s+Notes:)/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * 나열식(flat) 다중트랜치 문서의 redemption 섹션에서 특정 트랜치에 해당하는
+ * 문장만 남긴다 — 그 트랜치 라벨("2030 Notes")을 언급하는 문장 + 어떤 트랜치
+ * 라벨도 언급하지 않는(공통) 문장. 다른 트랜치만 언급한 문장은 제외한다.
+ * (감사 F3 — 실제 확인: Meta 2025-10-30 FWP 6트랜치가 전부 1번 트랜치의
+ * par call 2030-10-15·10bp로 복사돼 2065 Notes가 만기 35년 전 콜로 잡힘.)
+ */
+function scopeToTranche(text: string, label: string, allLabels: string[]): string {
+  const target = label.toLowerCase();
+  const others = allLabels
+    .map((l) => l.toLowerCase())
+    .filter((l) => l !== target);
+  return splitSentences(text)
+    .filter((s) => {
+      const lower = s.toLowerCase();
+      return lower.includes(target) || !others.some((o) => lower.includes(o));
+    })
+    .join(". ");
+}
+
+/**
+ * 블록 경로 라벨("4.000% Notes due 2028")을 나열식 문서에서 쓰는 짧은 형태
+ * ("2028 Notes")로 바꾼다. 424B 본문은 대개 짧은 형태로 트랜치를 지칭한다.
+ */
+function shortTrancheLabel(label: string): string {
+  const direct = label.match(/\b(?:19|20)\d{2}\s+Notes\b/);
+  if (direct) return direct[0];
+  const due = label.match(/due\s+((?:19|20)\d{2})/i);
+  return due ? `${due[1]} Notes` : label;
+}
+
+/**
+ * 명시적 par call일. 우선순위: "on or after <date>" → "Par Call Date ... is
+ * <date>" → (Apple류) "Prior to <date>, ... may redeem". 마지막 패턴은 문장
+ * 단위로 보되 특별의무상환(SMR)·Change of Control 등 무관한 문장은 제외한다
+ * (감사 F4 — 실제 확인: Lowe's 2025 FWP의 "If the Issuer does not consummate
+ * the FBM Acquisition on or prior to August 19, 2027 ... required to redeem"이
+ * par call로 잡혔고, "on or after" 패턴은 `\s+` 누락으로 절대 매치되지 않았다).
+ */
+function findExplicitParCallDate(source: string): string | null {
+  const onOrAfter = source.match(/\bon or after\s+([A-Za-z]+ \d{1,2},\s*\d{4})/i);
+  if (onOrAfter) return parseUsDate(onOrAfter[1]);
+
+  const parCallLabel = source.match(
+    /par call date[^.]{0,60}?(?:is|:|of)\s*([A-Za-z]+ \d{1,2},\s*\d{4})/i
+  );
+  if (parCallLabel) return parseUsDate(parCallLabel[1]);
+
+  for (const s of splitSentences(source)) {
+    if (!/redeem/i.test(s)) continue;
+    if (/special mandatory|consummat|required to redeem|change of control/i.test(s)) {
+      continue;
+    }
+    const priorTo = s.match(/\bprior to\s+([A-Za-z]+ \d{1,2},\s*\d{4})/i);
+    if (priorTo) return parseUsDate(priorTo[1]);
+  }
+  return null;
+}
+
+/**
+ * 명시적 날짜를 트랜치 만기 기준으로 검증한다: 만기보다 앞서고 지나치게 이르지
+ * 않은(만기 3년≈37개월 이내) 날짜만 par call로 인정. 통과하면 개월수도 함께.
+ */
+function capParCall(
+  parsedIso: string,
+  maturity: Date
+): { parCallDate: string; months: number } | null {
+  const d = new Date(parsedIso);
+  if (Number.isNaN(d.getTime())) return null;
+  const monthsBefore = (maturity.getTime() - d.getTime()) / (30.44 * 24 * 3600 * 1000);
+  if (monthsBefore > 0 && monthsBefore <= 37) {
+    return { parCallDate: parsedIso, months: Math.round(monthsBefore) };
+  }
+  return null;
+}
+
+/**
+ * redemption 본문(source)에서 make-whole 스프레드·par call일을 뽑는다.
+ * `dedicated`는 source가 redemption 전용 섹션인지(true) 문서 전체인지(false) —
+ * 전용 섹션이면 "plus N basis points"만으로도 스프레드로 인정한다.
+ */
+function parseRedemptionSource(
+  source: string,
+  dedicated: boolean,
+  maturityDate: string | null
+): RedemptionTerms {
+  const raw = dedicated ? source : "";
 
   let makeWholeSpreadBps: number | null = null;
   // "(Adjusted) Treasury Rate / Reinvestment Rate ... plus N basis points".
@@ -392,22 +502,16 @@ function extractRedemptionTerms(
     }
   }
 
-  // 명시적 날짜: "on or after <date>" / "Par Call Date ... is <date>" /
-  // (Apple 등) "Prior to <date>, ... may redeem ... make-whole".
+  // 명시적 날짜(findExplicitParCallDate) → 트랜치 만기 기준 캡(capParCall).
+  // 만기를 모르면 캡을 걸 수 없어 그대로 둔다(만기 없는 트랜치는 어차피
+  // 현금흐름 계산이 불가하므로 무해).
   if (!parCallDate) {
-    const explicitM =
-      source.match(
-        /(?:on or after|par call date[^.]{0,60}?(?:is|:|of)\s*)([A-Za-z]+ \d{1,2},\s*\d{4})/i
-      ) || source.match(/\bprior to\s+([A-Za-z]+ \d{1,2},\s*\d{4})/i);
-    const parsed = explicitM ? parseUsDate(explicitM[1]) : null;
-    // 만기보다 앞서고, 지나치게 이르지 않은(만기 3년 이내) 날짜만 par call로 인정.
+    const parsed = findExplicitParCallDate(source);
     if (parsed && matOk) {
-      const d = new Date(parsed);
-      const monthsBefore =
-        (matOk.getTime() - d.getTime()) / (30.44 * 24 * 3600 * 1000);
-      if (monthsBefore > 0 && monthsBefore <= 37) {
-        parCallDate = parsed;
-        parCallMonthsBeforeMaturity = Math.round(monthsBefore);
+      const capped = capParCall(parsed, matOk);
+      if (capped) {
+        parCallDate = capped.parCallDate;
+        parCallMonthsBeforeMaturity = capped.months;
       }
     } else if (parsed && !matOk) {
       parCallDate = parsed;
@@ -704,26 +808,24 @@ export function parseFwp(html: string): FwpParseResult {
     calcBasis: extractDayCountBasis(text),
   };
 
-  // 나열식 서식은 "Optional Redemption"이 한 번만 나오므로 전체에서 한 번 뽑고,
-  // 상대표현("만기 N개월 전")이면 트랜치별 만기로 각각 날짜화한다.
-  const redemptionBase = extractRedemptionTerms(text, null);
-  const redemptionFor = (maturityDate: string | null): RedemptionTerms => {
-    if (
-      redemptionBase.parCallDate === null &&
-      redemptionBase.parCallMonthsBeforeMaturity !== null &&
-      maturityDate
-    ) {
-      const mat = new Date(maturityDate);
-      if (!Number.isNaN(mat.getTime())) {
-        return {
-          ...redemptionBase,
-          parCallDate: toDateString(
-            addMonths(mat, -redemptionBase.parCallMonthsBeforeMaturity)
-          ),
-        };
-      }
+  // 나열식 서식은 "Optional Redemption" 섹션이 한 번만 나오고 그 안에 트랜치별
+  // 조건이 문장으로 섞여 있다. 섹션을 한 번 찾은 뒤 트랜치 라벨로 문장을
+  // 스코핑하고, 트랜치 만기를 넘겨 상대표현 날짜화·37개월 캡을 트랜치별로
+  // 적용한다(감사 F3 — 이전엔 만기 null로 한 번 뽑아 전 트랜치에 복사했고
+  // 캡도 우회됐다).
+  const redemptionRaw = findRedemptionSection(text);
+  const redemptionFor = (
+    label: string | null,
+    maturityDate: string | null
+  ): RedemptionTerms => {
+    if (redemptionRaw === null) {
+      return parseRedemptionSource(text, false, maturityDate);
     }
-    return redemptionBase;
+    const scoped =
+      label && trancheLabels.length > 1
+        ? scopeToTranche(redemptionRaw, label, trancheLabels)
+        : redemptionRaw;
+    return parseRedemptionSource(scoped, true, maturityDate);
   };
   // 풋옵션은 상대표현이 없어(항상 명시적 날짜) 트랜치 간 공유해도 무방하다.
   const putTerms = extractPutTerms(text);
@@ -737,7 +839,7 @@ export function parseFwp(html: string): FwpParseResult {
           isin: isins[i] ?? null,
           couponFrequencyMonths: extractCouponFrequencyMonths(text, label),
           ...shared,
-          ...redemptionFor(maturityDates[i] ?? null),
+          ...redemptionFor(label, maturityDates[i] ?? null),
           ...putTerms,
         }))
       : [
@@ -748,7 +850,7 @@ export function parseFwp(html: string): FwpParseResult {
             isin: isins[0] ?? null,
             couponFrequencyMonths: extractCouponFrequencyMonths(text),
             ...shared,
-            ...redemptionFor(maturityDates[0] ?? null),
+            ...redemptionFor(null, maturityDates[0] ?? null),
             ...putTerms,
           },
         ];
@@ -799,39 +901,35 @@ export async function fetchFwpDetail(
     }
   }
 
-  // 콜조항(make-whole 스프레드·par call일)이 FWP에 없으면 같은 발행의 424B에서 찾는다.
-  if (
-    result.tranches.some(
-      (t) =>
-        t.makeWholeSpreadBps === null &&
-        t.parCallDate === null &&
-        t.parCallMonthsBeforeMaturity === null
-    )
-  ) {
-    const anyMaturity =
-      result.tranches.find((t) => t.maturityDate)?.maturityDate ?? null;
-    const terms = await findRedemptionTerms(cik, filedDate, anyMaturity).catch(
-      () => null
-    );
-    if (terms) {
+  // 콜조항(make-whole 스프레드·par call일)이 FWP에 없으면 같은 발행의 424B에서
+  // 찾는다. 424B 본문도 트랜치별로 문장을 스코핑하고 각 트랜치 만기로 캡을
+  // 건다(감사 F3 — 이전엔 1번 트랜치 만기로 뽑은 명시일자를 전 트랜치에 복사).
+  const needsRedemption = (
+    t: Pick<RedemptionTerms, "makeWholeSpreadBps" | "parCallDate" | "parCallMonthsBeforeMaturity">
+  ) =>
+    t.makeWholeSpreadBps === null &&
+    t.parCallDate === null &&
+    t.parCallMonthsBeforeMaturity === null;
+  if (result.tranches.some(needsRedemption)) {
+    const text424 = await find424BText(cik, filedDate).catch(() => null);
+    if (text424) {
+      const raw424 = findRedemptionSection(text424);
+      const labels = result.tranches
+        .map((t) => shortTrancheLabel(t.label))
+        .filter(Boolean);
       for (const t of result.tranches) {
-        if (t.makeWholeSpreadBps === null) {
-          t.makeWholeSpreadBps = terms.makeWholeSpreadBps;
-        }
-        if (t.parCallDate === null && t.parCallMonthsBeforeMaturity === null) {
-          if (terms.parCallMonthsBeforeMaturity !== null && t.maturityDate) {
-            const mat = new Date(t.maturityDate);
-            if (!Number.isNaN(mat.getTime())) {
-              t.parCallDate = toDateString(
-                addMonths(mat, -terms.parCallMonthsBeforeMaturity)
-              );
-              t.parCallMonthsBeforeMaturity = terms.parCallMonthsBeforeMaturity;
-            }
-          } else {
-            t.parCallDate = terms.parCallDate;
-            t.parCallMonthsBeforeMaturity = terms.parCallMonthsBeforeMaturity;
-          }
-        }
+        if (!needsRedemption(t)) continue;
+        const scoped =
+          raw424 && t.label && labels.length > 1
+            ? scopeToTranche(raw424, shortTrancheLabel(t.label), labels)
+            : raw424;
+        const terms = scoped
+          ? parseRedemptionSource(scoped, true, t.maturityDate)
+          : parseRedemptionSource(text424, false, t.maturityDate);
+        if (needsRedemption(terms)) continue;
+        t.makeWholeSpreadBps = terms.makeWholeSpreadBps;
+        t.parCallDate = terms.parCallDate;
+        t.parCallMonthsBeforeMaturity = terms.parCallMonthsBeforeMaturity;
         if (!t.redemptionText && terms.redemptionText) {
           t.redemptionText = terms.redemptionText;
         }
@@ -865,6 +963,28 @@ export async function findRedemptionTerms(
   fwpFiledDate: string,
   maturityDate?: string | null
 ): Promise<RedemptionTerms | null> {
+  const text = await find424BText(cik, fwpFiledDate);
+  if (!text) return null;
+  const terms = extractRedemptionTerms(text, maturityDate ?? null);
+  if (
+    terms.makeWholeSpreadBps === null &&
+    terms.parCallDate === null &&
+    terms.parCallMonthsBeforeMaturity === null
+  ) {
+    return null;
+  }
+  return terms;
+}
+
+/**
+ * FWP와 비슷한 시점(±5일)에 같은 회사가 낸 424B 본문을 정규화 텍스트로 돌려준다.
+ * fetchFwpDetail의 콜 폴백이 트랜치별로 스코핑·캡을 걸 수 있도록 파싱 전
+ * 원문을 그대로 넘긴다.
+ */
+async function find424BText(
+  cik: string,
+  fwpFiledDate: string
+): Promise<string | null> {
   const filings = await getFilings(cik, "424B", 10);
   const target = filings.find((f) => {
     if (!fwpFiledDate || !f.filedDate) return false;
@@ -877,16 +997,7 @@ export async function findRedemptionTerms(
   const docUrl = await getPrimaryDocUrl(target.indexUrl);
   if (!docUrl) return null;
   const html = await fetchText(docUrl);
-  const text = htmlToText(html).replace(/\s+/g, " ");
-  const terms = extractRedemptionTerms(text, maturityDate ?? null);
-  if (
-    terms.makeWholeSpreadBps === null &&
-    terms.parCallDate === null &&
-    terms.parCallMonthsBeforeMaturity === null
-  ) {
-    return null;
-  }
-  return terms;
+  return htmlToText(html).replace(/\s+/g, " ");
 }
 
 /**
