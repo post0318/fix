@@ -502,20 +502,38 @@ function parseRedemptionSource(
 
   let makeWholeSpreadBps: number | null = null;
   // "(Adjusted) Treasury Rate / Reinvestment Rate ... plus N basis points".
-  // rate와 plus 사이에 "(as defined below)" 등 어구가 끼기도 한다.
-  const bpsM =
-    source.match(
-      /(?:treasury|reinvestment)\s+rate[^.]{0,90}?plus\s+([\d.]+)\s+basis points/i
-    ) ||
-    // 섹션이 redemption 전용이면 "plus N basis points" 자체가 make-whole 스프레드일 가능성이 높다.
-    (raw ? raw.match(/plus\s+([\d.]+)\s+basis points/i) : null);
-  if (bpsM) {
-    makeWholeSpreadBps = parseFloat(bpsM[1]);
-  } else {
-    const pctM = source.match(
-      /(?:treasury|reinvestment)\s+rate[^.]{0,90}?plus\s+([\d.]+)\s*%/i
-    );
-    if (pctM) makeWholeSpreadBps = Math.round(parseFloat(pctM[1]) * 100);
+  // rate와 plus 사이에 "(as defined below)" 등 어구가 끼기도 한다. 문장 단위로
+  // 보고, 갭은 절 경계(;)를 넘지 않게 좁히며, 변동금리 마진("SOFR plus 45
+  // basis points")이 있는 문장은 제외한다(Opus #7 — 이전엔 `[^.]{0,90}`가
+  // 세미콜론을 넘어 FRN 마진을 make-whole 스프레드로 오탐).
+  const isFloatingMargin = (s: string) =>
+    /\b(?:SOFR|LIBOR|EURIBOR|SONIA|floating rate|margin)\b/i.test(s);
+  const sentences = splitSentences(source);
+  for (const s of sentences) {
+    if (isFloatingMargin(s)) continue;
+    const m =
+      s.match(
+        /(?:treasury|reinvestment)\s+rate[^.;]{0,60}?plus\s+([\d.]+)\s+basis points/i
+      ) ||
+      s.match(/(?:treasury|reinvestment)\s+rate[^.;]{0,60}?plus\s+([\d.]+)\s*%/i);
+    if (m) {
+      makeWholeSpreadBps = /basis points/i.test(m[0])
+        ? parseFloat(m[1])
+        : Math.round(parseFloat(m[1]) * 100);
+      break;
+    }
+  }
+  // 섹션이 redemption 전용인데 "Treasury Rate" 어구가 없으면(약식 서식)
+  // "plus N basis points" 자체를 스프레드로 본다 — 역시 FRN 마진 문장은 제외.
+  if (makeWholeSpreadBps === null && raw) {
+    for (const s of sentences) {
+      if (isFloatingMargin(s)) continue;
+      const m = s.match(/plus\s+([\d.]+)\s+basis points/i);
+      if (m) {
+        makeWholeSpreadBps = parseFloat(m[1]);
+        break;
+      }
+    }
   }
 
   let parCallDate: string | null = null;
@@ -949,8 +967,15 @@ export async function fetchFwpDetail(
     t.makeWholeSpreadBps === null &&
     t.parCallDate === null &&
     t.parCallMonthsBeforeMaturity === null;
+  // 424B 본문은 콜·풋 폴백이 공유한다(한 번만 받음). 이 발행의 ISIN이 본문에
+  // 있는 문서만 인정(F9).
+  const tranchIsins = result.tranches.map((t) => t.isin ?? "").filter(Boolean);
+  let text424Promise: Promise<string | null> | null = null;
+  const load424B = () =>
+    (text424Promise ??= find424BText(cik, filedDate, tranchIsins).catch(() => null));
+
   if (result.tranches.some(needsRedemption)) {
-    const text424 = await find424BText(cik, filedDate).catch(() => null);
+    const text424 = await load424B();
     if (text424) {
       const raw424 = findRedemptionSection(text424);
       const labels = result.tranches
@@ -976,10 +1001,11 @@ export async function fetchFwpDetail(
     }
   }
 
-  // 풋옵션(투자자 조기상환청구권)도 FWP에 없으면 같은 발행의 424B에서 찾는다.
+  // 풋옵션(투자자 조기상환청구권)도 FWP에 없으면 같은 424B(ISIN 검증된 본문)에서 찾는다.
   if (result.tranches.some((t) => t.putDate === null)) {
-    const putTerms = await findPutTerms(cik, filedDate).catch(() => null);
-    if (putTerms) {
+    const text424 = await load424B();
+    const putTerms = text424 ? extractPutTerms(text424) : null;
+    if (putTerms && putTerms.putDate !== null) {
       for (const t of result.tranches) {
         if (t.putDate === null) {
           t.putDate = putTerms.putDate;
@@ -1022,21 +1048,38 @@ export async function findRedemptionTerms(
  */
 async function find424BText(
   cik: string,
-  fwpFiledDate: string
+  fwpFiledDate: string,
+  isins: string[] = []
 ): Promise<string | null> {
   const filings = await getFilings(cik, "424B", 10);
-  const target = filings.find((f) => {
+  const candidates = filings.filter((f) => {
     if (!fwpFiledDate || !f.filedDate) return false;
     const d1 = new Date(fwpFiledDate).getTime();
     const d2 = new Date(f.filedDate).getTime();
     return Math.abs(d1 - d2) <= 5 * 24 * 60 * 60 * 1000;
   });
-  if (!target) return null;
+  if (candidates.length === 0) return null;
 
-  const docUrl = await getPrimaryDocUrl(target.indexUrl);
-  if (!docUrl) return null;
-  const html = await fetchText(docUrl);
-  return htmlToText(html).replace(/\s+/g, " ");
+  // 발행이 잦은 MTN 프로그램(Toyota Motor Credit 등)은 ±5일 안에 다른 노트의
+  // pricing supplement가 여럿 있다. 본문에 이 채권의 ISIN(또는 CUSIP)이 있는
+  // 문서만 인정한다(감사 F9). ISIN을 모르면 후보가 하나일 때만 쓴다.
+  const keys = isins
+    .filter(Boolean)
+    .flatMap((isin) => [isin, /^US[0-9A-Z]{10}$/.test(isin) ? isin.slice(2, 11) : ""])
+    .filter(Boolean);
+  if (keys.length === 0) {
+    if (candidates.length !== 1) return null;
+    const docUrl = await getPrimaryDocUrl(candidates[0].indexUrl);
+    if (!docUrl) return null;
+    return htmlToText(await fetchText(docUrl)).replace(/\s+/g, " ");
+  }
+  for (const f of candidates.slice(0, 6)) {
+    const docUrl = await getPrimaryDocUrl(f.indexUrl);
+    if (!docUrl) continue;
+    const text = htmlToText(await fetchText(docUrl)).replace(/\s+/g, " ");
+    if (keys.some((k) => text.includes(k))) return text;
+  }
+  return null;
 }
 
 /**
@@ -1045,21 +1088,11 @@ async function find424BText(
  */
 export async function findPutTerms(
   cik: string,
-  fwpFiledDate: string
+  fwpFiledDate: string,
+  isins: string[] = []
 ): Promise<PutTerms | null> {
-  const filings = await getFilings(cik, "424B", 10);
-  const target = filings.find((f) => {
-    if (!fwpFiledDate || !f.filedDate) return false;
-    const d1 = new Date(fwpFiledDate).getTime();
-    const d2 = new Date(f.filedDate).getTime();
-    return Math.abs(d1 - d2) <= 5 * 24 * 60 * 60 * 1000;
-  });
-  if (!target) return null;
-
-  const docUrl = await getPrimaryDocUrl(target.indexUrl);
-  if (!docUrl) return null;
-  const html = await fetchText(docUrl);
-  const text = htmlToText(html).replace(/\s+/g, " ");
+  const text = await find424BText(cik, fwpFiledDate, isins);
+  if (!text) return null;
   const terms = extractPutTerms(text);
   return terms.putDate === null ? null : terms;
 }

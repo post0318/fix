@@ -149,7 +149,13 @@ interface UsBondSearchBoxProps {
   // 국채(RF/실시간 국가등급)나 값을 못 찾은 경우는 false.
   onApply: (
     fields: Partial<BondLayoutInput>,
-    meta?: { disclosureRating?: boolean }
+    meta?: {
+      disclosureRating?: boolean;
+      /** 콜/풋 조건이 공시서류 자동추출값(추정)인지 — 폼에서 "추정" 표시용 */
+      callTermsAuto?: boolean;
+      redemptionText?: string | null;
+      putText?: string | null;
+    }
   ) => void;
 }
 
@@ -388,7 +394,12 @@ export function UsBondSearchBox({ disabled, active, onApply }: UsBondSearchBoxPr
     // 조회 키로 쓰인다(국채 CUSIP은 SEC 채권 조회에 쓸 수 없어 제외).
     fields.isin = !isTreasury && tranche.isin ? tranche.isin : "";
 
-    onApply(fields, { disclosureRating: !isTreasury && !!tranche.rating });
+    onApply(fields, {
+      disclosureRating: !isTreasury && !!tranche.rating,
+      callTermsAuto: parsedHasCall || parsedHasPut,
+      redemptionText: tranche.redemptionText,
+      putText: tranche.putText,
+    });
     setRatingLink(isTreasury ? null : FINRA_FIXED_INCOME_URL);
     setRatingCusip(!isTreasury && tranche.isin ? cusipFromIsin(tranche.isin) : null);
     setCusipCopied(false);

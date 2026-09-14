@@ -238,6 +238,19 @@ const CALL_SCENARIO_LABELS: { value: CallScenario; label: string }[] = [
   { value: "put", label: "풋옵션 행사" },
 ];
 
+/** 공시서류 자동추출(추정) 안내문 — 원문 발췌를 함께 보여준다. */
+function autoTermsNoteText(
+  redemptionText?: string | null,
+  putText?: string | null
+): string {
+  const excerpt = [redemptionText, putText].filter(Boolean).join(" / ");
+  return excerpt
+    ? `공시서류 자동추출값(추정) — 원문 확인 필요. 발췌: "${excerpt.slice(0, 200)}${
+        excerpt.length > 200 ? "…" : ""
+      }"`
+    : "공시서류 자동추출값(추정) — 원문 확인 필요.";
+}
+
 /** 선취보수(차감) = 신탁투자금액 x 선취보수율 */
 function getFrontFeeAmount(
   trustInvestmentAmount: string,
@@ -328,6 +341,9 @@ export function BondLayoutForm({
   // 출처(국채/한국/브라질/종목검색/수기입력/업로드)로 바뀌면 false로
   // 되돌린다.
   const [disclosureRating, setDisclosureRating] = useState(false);
+  // 콜/풋 조건이 공시서류 자동추출값(추정)일 때 화면에 띄울 안내(원문 발췌 포함).
+  // 사용자가 직접 고치거나 종목이 바뀌면 지운다(Opus #10).
+  const [autoTermsNote, setAutoTermsNote] = useState<string | null>(null);
   const [treasuryCurve, setTreasuryCurve] = useState<YieldCurve | null>(null);
   const [treasuryStatus, setTreasuryStatus] = useState<string | null>(null);
   // 콜/풋 체크박스 재조회(검색 없이 켤 때, 또는 "다시 확인") 상태 문구.
@@ -573,6 +589,8 @@ export function BondLayoutForm({
           putDate: string | null;
           callAbsentConfirmed?: boolean;
           putAbsentConfirmed?: boolean;
+          redemptionText?: string | null;
+          putText?: string | null;
         };
       };
       // 응답이 오는 동안 종목이 바뀌었거나(ISIN 불일치) 사용자가 체크를
@@ -601,6 +619,7 @@ export function BondLayoutForm({
                 : prev.makeWholeSpreadBps,
           }));
           setCallPutStatus("공시서류에서 콜조항을 확인해 반영했습니다.");
+          setAutoTermsNote(autoTermsNoteText(t.redemptionText, null));
         } else if (t.callAbsentConfirmed) {
           // 문서가 "콜 없음"을 명시한 경우에만 경고 + 체크 해제.
           onChange((prev) => ({
@@ -623,6 +642,7 @@ export function BondLayoutForm({
           const putDate = t.putDate;
           onChange((prev) => ({ ...prev, putDate }));
           setCallPutStatus("공시서류에서 풋옵션을 확인해 반영했습니다.");
+          setAutoTermsNote(autoTermsNoteText(null, t.putText));
         } else if (t.putAbsentConfirmed) {
           onChange((prev) => ({
             ...prev,
@@ -664,6 +684,7 @@ export function BondLayoutForm({
       onChange(merged);
       onLockedChange(true);
       setDisclosureRating(false);
+      setAutoTermsNote(null);
       setUploadStatus(`${count}개 항목을 반영했습니다.`);
     } catch {
       setUploadStatus("파일을 읽는 중 오류가 발생했습니다.");
@@ -699,6 +720,7 @@ export function BondLayoutForm({
             setActiveSearchBox("general");
             onLockedChange(false);
             setDisclosureRating(false);
+            setAutoTermsNote(null);
             onChange((prev) => applyFieldsWithCurrencySync(prev, fields));
           }}
         />
@@ -711,6 +733,13 @@ export function BondLayoutForm({
             if (meta?.disclosureRating !== undefined) {
               setDisclosureRating(meta.disclosureRating);
             }
+            if (meta?.callTermsAuto !== undefined) {
+              setAutoTermsNote(
+                meta.callTermsAuto
+                  ? autoTermsNoteText(meta.redemptionText, meta.putText)
+                  : null
+              );
+            }
             onChange((prev) => applyFieldsWithCurrencySync(prev, fields));
           }}
         />
@@ -721,6 +750,7 @@ export function BondLayoutForm({
             setActiveSearchBox("kr");
             onLockedChange(false);
             setDisclosureRating(false);
+            setAutoTermsNote(null);
             onChange((prev) => applyFieldsWithCurrencySync(prev, fields));
           }}
         />
@@ -823,15 +853,16 @@ export function BondLayoutForm({
               type="date"
               value={value.maturityDate}
               disabled={locked}
-              onChange={(e) =>
+              onChange={(e) => {
                 // 만기일을 수기로 바꾸면 이전 종목의 콜/풋/ISIN·신탁만기일 override는
                 // 무의미하므로 검색/업로드 경로와 동일하게 초기화한다(감사 F7).
+                setAutoTermsNote(null);
                 onChange({
                   ...value,
                   ...clearedCallFields({}),
                   maturityDate: clampDateYear(e.target.value),
-                })
-              }
+                });
+              }}
               onKeyDown={commitOnEnter}
             />
           </Row>
@@ -1488,6 +1519,7 @@ export function BondLayoutForm({
                   type="date"
                   value={value.parCallDate}
                   onChange={(e) => {
+                    setAutoTermsNote(null);
                     const next = {
                       ...value,
                       parCallDate: clampDateYear(e.target.value),
@@ -1512,6 +1544,7 @@ export function BondLayoutForm({
                   onFocus={selectAllOnFocus}
                   onChange={(e) => {
                     if (PERCENT_INPUT_PATTERN.test(e.target.value)) {
+                      setAutoTermsNote(null);
                       update("makeWholeSpreadBps", e.target.value);
                     }
                   }}
@@ -1551,9 +1584,23 @@ export function BondLayoutForm({
                 className={inputClass}
                 type="date"
                 value={value.putDate}
-                onChange={(e) => update("putDate", clampDateYear(e.target.value))}
+                onChange={(e) => {
+                  setAutoTermsNote(null);
+                  update("putDate", clampDateYear(e.target.value));
+                }}
                 onKeyDown={commitOnEnter}
               />
+            </Row>
+          )}
+
+          {autoTermsNote && (value.hasCall || value.hasPut) && (
+            <Row label="">
+              <span className="text-xs text-amber-700 dark:text-amber-400 print:hidden">
+                <span className="mr-1 rounded border border-amber-400 px-1 text-[10px] font-semibold">
+                  추정
+                </span>
+                {autoTermsNote}
+              </span>
             </Row>
           )}
 
