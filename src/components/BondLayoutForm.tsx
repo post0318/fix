@@ -26,6 +26,7 @@ import {
   getRecentCouponDate,
   getSettlementDate,
   getTrustMaturityDate,
+  getTrustMaturityLeadDays,
 } from "@/lib/couponSchedule";
 import {
   computeBondPricing,
@@ -412,12 +413,6 @@ export function BondLayoutForm({
     ]
   );
 
-  // 콜 시나리오가 적용 중(hold가 아님)이면 신탁만기일 수기 override는 무시한다.
-  // override는 "만기일+11일" 기준으로 굳어 있어, 상환일이 만기와 달라지는
-  // 콜 상황에 그대로 쓰면 투자일수가 어긋난다(감사 #4).
-  const effectiveTrustMaturityOverride =
-    effectiveRedemption.applied === "hold" ? value.trustMaturityDate : "";
-
   const cashFlowRows = useMemo(
     () =>
       generateFixCashFlow({
@@ -481,7 +476,7 @@ export function BondLayoutForm({
             trustContractDate: value.trustContractDate,
             maturityDate: value.maturityDate,
             redemptionDate: effectiveRedemption.redemptionDate,
-            trustMaturityDate: effectiveTrustMaturityOverride,
+            trustMaturityDate: value.trustMaturityDate,
             redemptionPriceFactor: effectiveRedemption.redemptionPriceFactor,
             comprehensiveTaxRate: value.incomeTaxRate,
           })
@@ -492,7 +487,7 @@ export function BondLayoutForm({
       value.maturityDate,
       effectiveRedemption.redemptionDate,
       effectiveRedemption.redemptionPriceFactor,
-      effectiveTrustMaturityOverride,
+      value.trustMaturityDate,
       value.incomeTaxRate,
     ]
   );
@@ -1242,29 +1237,57 @@ export function BondLayoutForm({
           </Row>
           <Row label="신탁만기일" editable>
             {(() => {
-              // 콜 시나리오면 실효 상환일 기준(+11일), 아니면 만기일 기준.
-              const autoDate =
+              // 신탁만기일 = 실효 상환일(만기 또는 콜/풋일) + 리드타임. 리드타임은
+              // 기본 11일이고, 수기 override가 있으면 (override − 자산만기)
+              // 차이일이 되어 콜/풋 상환일에도 그대로 적용된다.
+              const redemptionDate =
+                effectiveRedemption.redemptionDate || value.maturityDate;
+              const displayed =
                 getTrustMaturityDate(
-                  effectiveRedemption.redemptionDate || value.maturityDate,
-                  ""
+                  redemptionDate,
+                  value.trustMaturityDate,
+                  value.maturityDate
                 ) ?? "";
-              // 콜 시나리오 적용 중에는 override가 계산에 반영되지 않으므로
-              // (감사 #4) 표시도 자동값으로 되돌린다 — 입력값 자체는
-              // trustMaturityDate에 그대로 남아 hold로 돌아오면 복원된다.
-              const isOverridden = effectiveTrustMaturityOverride.trim() !== "";
-              const isSuspended =
-                !isOverridden && value.trustMaturityDate.trim() !== "";
-              if (!isOverridden && autoDate === "") return <ComputedValue />;
+              const isOverridden = value.trustMaturityDate.trim() !== "";
+              const isEarlyRedemption =
+                effectiveRedemption.applied !== "hold" && isOverridden;
+              const leadDays = getTrustMaturityLeadDays(
+                value.maturityDate,
+                value.trustMaturityDate
+              );
+              if (!isOverridden && displayed === "") return <ComputedValue />;
               return (
                 <div className="flex w-full flex-col gap-1">
                   <div className="flex w-full items-center gap-2">
                     <input
                       className={inputClass}
                       type="date"
-                      value={isOverridden ? value.trustMaturityDate : autoDate}
-                      onChange={(e) =>
-                        update("trustMaturityDate", clampDateYear(e.target.value))
-                      }
+                      value={displayed}
+                      onChange={(e) => {
+                        const typed = clampDateYear(e.target.value);
+                        // 콜/풋 시나리오 중에 고치면 "상환일 대비 차이일"을 자산만기
+                        // 기준으로 환산해 저장한다 — 저장값은 항상 만기 기준 신탁만기일.
+                        if (
+                          effectiveRedemption.applied !== "hold" &&
+                          /^\d{4}-\d{2}-\d{2}$/.test(typed)
+                        ) {
+                          const gapDays = Math.round(
+                            (new Date(typed).getTime() -
+                              new Date(redemptionDate).getTime()) /
+                              86400000
+                          );
+                          const asset = new Date(value.maturityDate);
+                          if (!Number.isNaN(asset.getTime())) {
+                            asset.setUTCDate(asset.getUTCDate() + gapDays);
+                            update(
+                              "trustMaturityDate",
+                              asset.toISOString().slice(0, 10)
+                            );
+                            return;
+                          }
+                        }
+                        update("trustMaturityDate", typed);
+                      }}
                       onKeyDown={commitOnEnter}
                     />
                     {isOverridden ? (
@@ -1281,10 +1304,10 @@ export function BondLayoutForm({
                       </span>
                     )}
                   </div>
-                  {isSuspended && (
-                    <span className="text-xs text-amber-600 dark:text-amber-500 print:hidden">
-                      콜 시나리오 적용 중에는 수기값이 무시되고 자동계산이
-                      쓰입니다.
+                  {isEarlyRedemption && (
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400 print:hidden">
+                      수기 신탁만기일과 자산만기의 차이 {leadDays}일을 상환일에
+                      적용한 값입니다.
                     </span>
                   )}
                 </div>
@@ -1296,7 +1319,8 @@ export function BondLayoutForm({
               const days = getInvestmentDays(
                 value.trustContractDate,
                 effectiveRedemption.redemptionDate || value.maturityDate,
-                effectiveTrustMaturityOverride
+                value.trustMaturityDate,
+                value.maturityDate
               );
               return days !== null ? (
                 <span className="text-sm text-zinc-900 dark:text-zinc-100">

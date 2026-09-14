@@ -46,10 +46,12 @@ export function computeMaturitySummary(
   rows: CashFlowRow[],
   input: MaturitySummaryInputs
 ): MaturitySummary | null {
+  // 신탁만기일 override는 (override − 자산만기) 차이일로 환산돼 상환일에 적용된다.
   const investmentDays = getInvestmentDays(
     input.trustContractDate,
     input.redemptionDate || input.maturityDate,
-    input.trustMaturityDate
+    input.trustMaturityDate,
+    input.maturityDate
   );
   if (!investmentDays || rows.length === 0) return null;
 

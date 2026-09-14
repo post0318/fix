@@ -113,32 +113,56 @@ export function getCouponPeriod(
 }
 
 /**
- * 신탁만기일. 기본값은 만기일 + 11일이며, 이 값은 영업점에서 직접 수정할 수
- * 있다. `override`가 유효한 날짜(YYYY-MM-DD)면 그 값을 그대로 쓰고, 비어
- * 있거나 형식이 잘못되면 자동계산값(만기일+11일)으로 되돌아간다.
+ * 신탁만기 리드타임(일) = 신탁만기일 − 자산(채권) 만기일. 기본 11일이며,
+ * 영업점이 신탁만기일을 수기로 고치면 그 차이일이 리드타임이 된다. 콜/풋
+ * 조기상환 시나리오에서는 이 차이일을 상환일에 그대로 적용한다(사용자 지시:
+ * "자산만기와 신탁만기 간 차이일만큼") — override 날짜 자체를 만기 기준으로
+ * 고정해 쓰던 것(Opus #4)도, 콜 시나리오에서 override를 무시하던 것도 아니다.
  */
-export function getTrustMaturityDate(
-  maturityDate: string,
+export function getTrustMaturityLeadDays(
+  assetMaturityDate: string,
   override?: string
-): string | null {
+): number {
   if (override && /^\d{1,4}-\d{2}-\d{2}$/.test(override)) {
     const overridden = new Date(override);
-    if (!Number.isNaN(overridden.getTime())) return toDateString(overridden);
+    const asset = new Date(assetMaturityDate);
+    if (!Number.isNaN(overridden.getTime()) && !Number.isNaN(asset.getTime())) {
+      return Math.round((overridden.getTime() - asset.getTime()) / MS_PER_DAY);
+    }
   }
-  const maturity = new Date(maturityDate);
-  if (Number.isNaN(maturity.getTime())) return null;
-  return toDateString(addDays(maturity, TRUST_MATURITY_LEAD_DAYS));
+  return TRUST_MATURITY_LEAD_DAYS;
+}
+
+/**
+ * 신탁만기일 = 실효 원금상환일(만기 또는 콜/풋 상환일) + 리드타임.
+ * `assetMaturityDate`를 생략하면 redemptionDate를 자산만기로 본다(만기보유) —
+ * 이때 override가 있으면 결과는 override 그 자체(기존 동작과 동일).
+ */
+export function getTrustMaturityDate(
+  redemptionDate: string,
+  override?: string,
+  assetMaturityDate?: string
+): string | null {
+  const base = new Date(redemptionDate);
+  if (Number.isNaN(base.getTime())) return null;
+  const lead = getTrustMaturityLeadDays(assetMaturityDate ?? redemptionDate, override);
+  return toDateString(addDays(base, lead));
 }
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
-/** 투자일수 = 신탁만기일 - 신탁계약일 (일). trustMaturityOverride가 있으면 그 값 기준. */
+/** 투자일수 = 신탁만기일 - 신탁계약일 (일). override는 자산만기 대비 차이일로 반영. */
 export function getInvestmentDays(
   trustContractDate: string,
-  maturityDate: string,
-  trustMaturityOverride?: string
+  redemptionDate: string,
+  trustMaturityOverride?: string,
+  assetMaturityDate?: string
 ): number | null {
-  const trustMaturity = getTrustMaturityDate(maturityDate, trustMaturityOverride);
+  const trustMaturity = getTrustMaturityDate(
+    redemptionDate,
+    trustMaturityOverride,
+    assetMaturityDate
+  );
   if (!trustMaturity) return null;
 
   const contract = new Date(trustContractDate);
