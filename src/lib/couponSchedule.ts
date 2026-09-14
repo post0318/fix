@@ -20,15 +20,23 @@ export function addMonths(date: Date, months: number): Date {
   const d = date.getUTCDate();
   // 목표 월의 1일로 옮긴 뒤, 그 달 마지막 날을 넘지 않게 clamp 한다.
   // (예: 8/31 − 6개월 → 2/31 이 setUTCMonth로는 3/3 으로 넘어가던 것 → 2/28.)
-  // 원래 날짜가 월말이면 min(day, 목표월 마지막날)로 결과도 자동 월말이 된다 —
-  // 월말 만기 채권(미국 국채 등)의 이표일이 월말에 고정된다.
+  //
+  // EOM(월말) 규칙: 원래 날짜가 그 달 마지막 날이면 결과도 목표월 마지막 날로
+  // 고정한다(엑셀 COUPPCD/COUPNCD·시장관행 — 미국 국채 2/28 만기 → 8/31·2/28
+  // 이표, 11/30 만기 → 5/31·11/30). clamp만으로는 31일 만기에만 월말이 유지되고
+  // 2/28·4/30·6/30·9/30·11/30 만기는 28·30일로 어긋났다(감사 F2). 윤년 2/28은
+  // 월말이 아니므로(2/29가 있음) EOM으로 취급하지 않는다 — 관행과 일치.
+  const sourceLastDay = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)
+  ).getUTCDate();
+  const isEom = d === sourceLastDay;
   const target = new Date(
     Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1)
   );
   const lastDay = new Date(
     Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)
   ).getUTCDate();
-  target.setUTCDate(Math.min(d, lastDay));
+  target.setUTCDate(isEom ? lastDay : Math.min(d, lastDay));
   return target;
 }
 
