@@ -398,10 +398,16 @@ export function computeBondPricing(
   // 기준이라야 clean+경과=dirty 검산이 맞는다. ACT/ACT만 ICMA(쿠폰기간 분율 ÷
   // 지급횟수)로 별도 계산 — YEARFRAC(...,1)(ISDA 연도분할)은 엑셀 PRICE(...,1)과
   // 어긋난다. 나머지(30/360 US·EU, ACT/360, ACT/365)는 yearFrac이 이미 맞다.
+  // ACT/ACT의 기간 끝(다음 이표일)은 수기 최근이표일이 있으면 그 날짜 + 지급주기,
+  // 없으면 만기 역산 그리드 — 다른 basis처럼 수기값을 존중한다(Fable 감사 F11:
+  // 이전엔 ACT/ACT만 수기값을 무시하고 역산값을 써서 basis 간 기준이 달랐다).
+  const periodEnd = input.recentCouponDate
+    ? addMonths(recentCoupon, FREQUENCY_MONTHS[input.couponFrequency])
+    : period.nextCouponDate;
   const accrualFrac =
     basis === 1
-      ? actualDays(period.previousCouponDate, settlement) /
-        actualDays(period.previousCouponDate, period.nextCouponDate) /
+      ? actualDays(recentCoupon, settlement) /
+        actualDays(recentCoupon, periodEnd) /
         FREQUENCY_PER_YEAR[input.couponFrequency]
       : yearFrac(recentCoupon, settlement, basis);
 
