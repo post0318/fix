@@ -34,6 +34,10 @@ import {
   getMakeWholeDiscountHorizon,
 } from "@/lib/bondPricing";
 import { generateFixCashFlow } from "@/lib/cashFlowSchedule";
+import {
+  interpolateTreasuryRate,
+  type TreasuryParYieldCurve as YieldCurve,
+} from "@/lib/yieldCurve";
 import { computeMaturitySummary } from "@/lib/maturitySummary";
 import { parseBondFile } from "@/lib/parseBondFile";
 import { encodeBondLink } from "@/lib/bondLink";
@@ -199,28 +203,6 @@ function formatTwoDecimals(raw: string): string {
   if (raw === "") return raw;
   const num = Number(raw);
   return Number.isNaN(num) ? raw : num.toFixed(2);
-}
-
-interface YieldCurve {
-  date: string;
-  points: { years: number; rate: number }[];
-}
-
-/** 국채 수익률곡선에서 잔존만기(연) 금리를 선형보간 (양끝 클램프) */
-function interpCurve(curve: YieldCurve, years: number): number | null {
-  const pts = curve.points;
-  if (!pts || pts.length === 0) return null;
-  if (years <= pts[0].years) return pts[0].rate;
-  if (years >= pts[pts.length - 1].years) return pts[pts.length - 1].rate;
-  for (let i = 1; i < pts.length; i++) {
-    const lo = pts[i - 1];
-    const hi = pts[i];
-    if (years <= hi.years) {
-      const t = (years - lo.years) / (hi.years - lo.years);
-      return lo.rate + t * (hi.rate - lo.rate);
-    }
-  }
-  return pts[pts.length - 1].rate;
 }
 
 /** 두 ISO 날짜 사이 연수 (365.25일 기준) */
@@ -544,7 +526,7 @@ export function BondLayoutForm({
         return;
       }
     }
-    const rate = interpCurve(curve, years);
+    const rate = interpolateTreasuryRate(curve, years);
     if (rate === null) return;
     // 곡선 fetch 동안 상환일·par call일·만기·시나리오가 바뀌었으면 이 결과는
     // 다른 잔존만기에 대한 값이므로 폐기한다.

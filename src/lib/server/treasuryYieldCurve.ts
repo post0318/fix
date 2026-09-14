@@ -6,18 +6,9 @@ const TTL_MS = 6 * 60 * 60 * 1000;
 const REDIS_KEY = "us-treasury-yield-curve-v1";
 const REDIS_TTL_SECONDS = 24 * 60 * 60;
 
-/** 미 재무부 일별 국채 par yield curve의 한 테너 점 (연 단위 만기, % 금리) */
-export interface YieldCurvePoint {
-  years: number;
-  rate: number;
-}
-
-export interface TreasuryParYieldCurve {
-  /** 곡선 기준일 (YYYY-MM-DD) */
-  date: string;
-  /** 만기(연) 오름차순 정렬 */
-  points: YieldCurvePoint[];
-}
+// 타입·보간은 클라이언트와 공유하는 순수 모듈(@/lib/yieldCurve)에 있다.
+import type { TreasuryParYieldCurve, YieldCurvePoint } from "@/lib/yieldCurve";
+export type { TreasuryParYieldCurve, YieldCurvePoint } from "@/lib/yieldCurve";
 
 // XML의 <d:BC_*> 필드 → 만기(연). BC_30YEARDISPLAY 등 표시용 필드는 제외.
 const TENOR_YEARS: Record<string, number> = {
@@ -125,25 +116,3 @@ export async function getTreasuryParYieldCurve(): Promise<TreasuryParYieldCurve 
   return curve;
 }
 
-/**
- * 곡선에서 임의 잔존만기(연)의 금리를 선형보간한다. 양끝은 클램프.
- * make-whole "Treasury Rate"(H.15 CMT를 잔존만기로 보간)의 근사치.
- */
-export function interpolateTreasuryRate(
-  curve: TreasuryParYieldCurve,
-  years: number
-): number | null {
-  const pts = curve.points;
-  if (pts.length === 0) return null;
-  if (years <= pts[0].years) return pts[0].rate;
-  if (years >= pts[pts.length - 1].years) return pts[pts.length - 1].rate;
-  for (let i = 1; i < pts.length; i++) {
-    const lo = pts[i - 1];
-    const hi = pts[i];
-    if (years <= hi.years) {
-      const t = (years - lo.years) / (hi.years - lo.years);
-      return lo.rate + t * (hi.rate - lo.rate);
-    }
-  }
-  return pts[pts.length - 1].rate;
-}
