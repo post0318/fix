@@ -7,7 +7,9 @@ import {
   KeyboardEvent,
   ReactNode,
   SetStateAction,
+  useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -329,6 +331,12 @@ export function BondLayoutForm({
   const [treasuryStatus, setTreasuryStatus] = useState<string | null>(null);
   // 콜/풋 체크박스 재조회(검색 없이 켤 때, 또는 "다시 확인") 상태 문구.
   const [callPutStatus, setCallPutStatus] = useState<string | null>(null);
+  // 비동기 응답(국채곡선 보간 등)이 돌아왔을 때 그 사이 입력이 바뀌었는지
+  // 확인하기 위한 최신 value 스냅샷.
+  const latestValue = useRef(value);
+  useEffect(() => {
+    latestValue.current = value;
+  });
 
   const update = <K extends keyof BondLayoutInput>(
     key: K,
@@ -491,8 +499,14 @@ export function BondLayoutForm({
 
   // make-whole 기준 국채금리 자동채움: 국채곡선을 받아 (상환일~PV지평) 잔존만기로
   // 보간해 makeWholeRefYield에 넣는다. PV지평은 par call일이 있으면 그 날짜다
-  // (make-whole 상환가 계산과 동일 기준 — 감사 #2). 시나리오/상환일 변경
-  // 핸들러가 만든 다음 상태(next)를 그대로 받아, 같은 turn의 변경을 덮어쓰지 않는다.
+  // (make-whole 상환가 계산과 동일 기준 — 감사 #2).
+  //
+  // - force=false: 이미 값이 있으면 건드리지 않음(시나리오 최초 선택 시).
+  // - force=true: 상환일·par call일이 바뀌면 잔존만기가 달라지므로 항상 재보간
+  //   (감사 F8 — 이전엔 값이 있으면 그대로 둬 5y 금리가 2y 상환에 남았다).
+  // - 결과 반영은 functional update로 makeWholeRefYield만 병합하고, 요청
+  //   시점의 날짜·시나리오가 그 사이 바뀌었으면 폐기한다(stale closure로
+  //   다른 입력을 덮어쓰던 문제).
   const applyMakeWholeRate = async (next: BondLayoutInput, force: boolean) => {
     if (next.callScenario !== "makeWhole") return;
     if (!next.makeWholeRedemptionDate || !next.maturityDate) return;
@@ -521,10 +535,20 @@ export function BondLayoutForm({
     }
     const rate = interpCurve(curve, years);
     if (rate === null) return;
+    // 곡선 fetch 동안 상환일·par call일·만기·시나리오가 바뀌었으면 이 결과는
+    // 다른 잔존만기에 대한 값이므로 폐기한다.
+    const now = latestValue.current;
+    const stillSame =
+      now.callScenario === "makeWhole" &&
+      now.makeWholeRedemptionDate === next.makeWholeRedemptionDate &&
+      now.parCallDate === next.parCallDate &&
+      now.maturityDate === next.maturityDate;
+    if (!stillSame) return;
     setTreasuryStatus(
       `${curve.date} 국채곡선 · 잔존 ${years.toFixed(1)}년 보간값`
     );
-    onChange({ ...next, makeWholeRefYield: rate.toFixed(3) });
+    const refYield = rate.toFixed(3);
+    onChange((prev) => ({ ...prev, makeWholeRefYield: refYield }));
   };
 
   // 콜/풋 체크박스 재조회: 검색을 거치지 않고 체크박스를 켤 때(또는 "다시
@@ -773,7 +797,15 @@ export function BondLayoutForm({
               type="date"
               value={value.maturityDate}
               disabled={locked}
-              onChange={(e) => update("maturityDate", clampDateYear(e.target.value))}
+              onChange={(e) =>
+                // 만기일을 수기로 바꾸면 이전 종목의 콜/풋/ISIN·신탁만기일 override는
+                // 무의미하므로 검색/업로드 경로와 동일하게 초기화한다(감사 F7).
+                onChange({
+                  ...value,
+                  ...clearedCallFields({}),
+                  maturityDate: clampDateYear(e.target.value),
+                })
+              }
               onKeyDown={commitOnEnter}
             />
           </Row>
@@ -1400,9 +1432,18 @@ export function BondLayoutForm({
                   className={inputClass}
                   type="date"
                   value={value.parCallDate}
-                  onChange={(e) =>
-                    update("parCallDate", clampDateYear(e.target.value))
-                  }
+                  onChange={(e) => {
+                    const next = {
+                      ...value,
+                      parCallDate: clampDateYear(e.target.value),
+                    };
+                    onChange(next);
+                    // par call일은 make-whole PV 지평(잔존만기)이므로 makeWhole
+                    // 시나리오 중이면 기준금리를 재보간한다(감사 F8).
+                    if (next.callScenario === "makeWhole") {
+                      void applyMakeWholeRate(next, true);
+                    }
+                  }}
                   onKeyDown={commitOnEnter}
                 />
               </Row>
@@ -1516,7 +1557,8 @@ export function BondLayoutForm({
                           makeWholeRedemptionDate: clampDateYear(e.target.value),
                         };
                         onChange(next);
-                        void applyMakeWholeRate(next, false);
+                        // 상환일이 바뀌면 잔존만기가 달라지므로 항상 재보간(감사 F8).
+                        void applyMakeWholeRate(next, true);
                       }}
                       onKeyDown={commitOnEnter}
                     />

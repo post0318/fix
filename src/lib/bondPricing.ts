@@ -650,6 +650,22 @@ export function getEffectiveRedemption(
     : input.tradeCurrency === "KRW"
       ? 10000
       : 100;
+
+  // 상환일이 par call일 이후면 par call 기간이라 make-whole 프리미엄 없이
+  // 액면(100%) 상환이다(감사 F6 — 이전엔 만기까지 할인해 100.277 같은
+  // 프리미엄이 나왔다). 시나리오 표시는 makeWhole로 유지하되 상환가 100.
+  if (input.parCallDate) {
+    const parCall = new Date(input.parCallDate);
+    if (!Number.isNaN(parCall.getTime()) && d >= parCall) {
+      return {
+        redemptionDate: input.makeWholeRedemptionDate,
+        redemptionPriceFactor: 1,
+        makeWholePricePer100: 100,
+        applied: "makeWhole",
+      };
+    }
+  }
+
   // PV 지평은 par call일이 있으면 그 날을 "만기"로 가정한다(감사 #2).
   const horizon = new Date(
     getMakeWholeDiscountHorizon(
