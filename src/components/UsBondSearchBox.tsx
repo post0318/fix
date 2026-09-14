@@ -70,6 +70,8 @@ interface BondTranche {
   redemptionText: string | null;
   putDate: string | null;
   putText: string | null;
+  callAbsentConfirmed: boolean;
+  putAbsentConfirmed: boolean;
 }
 
 interface FwpDetail {
@@ -294,6 +296,8 @@ export function UsBondSearchBox({ disabled, active, onApply }: UsBondSearchBoxPr
         redemptionText: null,
         putDate: null,
         putText: null,
+        callAbsentConfirmed: false,
+        putAbsentConfirmed: false,
       };
       applyTranche(tranche, TREASURY_COMPANY.name, "USD", true);
       fetch("/api/country-rating?slug=united-states")

@@ -159,6 +159,10 @@ function htmlToText(html: string): string {
     .replace(/&#128;|&#8364;/g, "€")
     .replace(/&yen;|&#165;/gi, "¥")
     .replace(/&pound;|&#163;/gi, "£")
+    // MTN 텀시트의 체크박스 글리프(☒ 선택 / ☐ 미선택). "콜/풋 없음" 확정 판정에
+    // 쓰이므로 엔티티로 들어와도 문자로 남긴다.
+    .replace(/&#9746;|&#x2612;/gi, "☒")
+    .replace(/&#9744;|&#x2610;/gi, "☐")
     .replace(/&#160;/g, " ")
     .replace(/[ \t]+/g, " ")
     .replace(/\n{2,}/g, "\n");
@@ -291,6 +295,14 @@ export interface BondTranche {
   putDate: string | null;
   /** 풋옵션 관련 원문 발췌(표시/디버그용). */
   putText: string | null;
+  /**
+   * 문서가 "콜 없음"을 명시했는지(체크박스 템플릿 "☒ may not be redeemed",
+   * "Optional Redemption: None", "non-callable"). 파싱 미탐(null/null)과
+   * 구분하기 위한 플래그 — 재조회 시 이 값이 true일 때만 "없음 확인" 경고.
+   */
+  callAbsentConfirmed: boolean;
+  /** 문서가 "풋 없음"을 명시했는지("☒ may not be repaid ... at the option of the holder"). */
+  putAbsentConfirmed: boolean;
 }
 
 export interface RedemptionTerms {
@@ -313,6 +325,29 @@ export interface PutTerms {
 }
 
 const EMPTY_PUT: PutTerms = { putDate: null, putText: null };
+
+export interface AbsenceFlags {
+  callAbsentConfirmed: boolean;
+  putAbsentConfirmed: boolean;
+}
+
+/**
+ * 문서가 콜/풋의 부재를 명시했는지 판정한다. 파싱 미탐(조항을 못 읽음)과
+ * "없음 확인"을 구분하기 위한 것으로(감사 F5), 명시 문구가 있을 때만 true.
+ * - MTN 체크박스 템플릿(Toyota/PACCAR): 선택 글리프(☒)가 붙은 부정문만 인정 —
+ *   미선택(☐) 부정문은 옵션이 있는 문서에도 같이 인쇄돼 있다.
+ * - 라벨형: "Optional Redemption: None / N/A / Not applicable", "non-callable".
+ */
+function detectAbsence(text: string): AbsenceFlags {
+  const callAbsentConfirmed =
+    /☒\s*The Notes may not be redeemed prior to (?:the )?Maturity Date/i.test(text) ||
+    /Optional Redemption:\s*(?:None|N\/A|Not applicable|Not redeemable)\b/i.test(text) ||
+    /\bnon-?callable\b/i.test(text);
+  const putAbsentConfirmed =
+    /☒\s*The Notes may not be repaid prior to (?:the )?Maturity Date/i.test(text) ||
+    /Optional Repayment(?: Date\(s\))?:\s*(?:None|N\/A|Not applicable)\b/i.test(text);
+  return { callAbsentConfirmed, putAbsentConfirmed };
+}
 
 /**
  * MTN 프로그램(Toyota Motor Credit·PACCAR Financial 등)의 FWP는 풋옵션을
@@ -721,6 +756,7 @@ function parseTrancheBlock(block: string): Omit<BondTranche, "label"> {
     calcBasis: extractDayCountBasis(block),
     ...extractRedemptionTerms(block, maturityDate),
     ...extractPutTerms(block),
+    ...detectAbsence(block),
   };
 }
 
@@ -829,6 +865,7 @@ export function parseFwp(html: string): FwpParseResult {
   };
   // 풋옵션은 상대표현이 없어(항상 명시적 날짜) 트랜치 간 공유해도 무방하다.
   const putTerms = extractPutTerms(text);
+  const absence = detectAbsence(text);
 
   const tranches: BondTranche[] =
     trancheLabels.length > 0
@@ -841,6 +878,7 @@ export function parseFwp(html: string): FwpParseResult {
           ...shared,
           ...redemptionFor(label, maturityDates[i] ?? null),
           ...putTerms,
+          ...absence,
         }))
       : [
           {
@@ -852,6 +890,7 @@ export function parseFwp(html: string): FwpParseResult {
             ...shared,
             ...redemptionFor(null, maturityDates[0] ?? null),
             ...putTerms,
+            ...absence,
           },
         ];
 
@@ -1161,7 +1200,12 @@ export async function findCallPutTermsByIsin(
   const found = await findFwpByIsinFullText(isin);
   if (!found) return null;
   const detail = await fetchFwpDetail(found.indexUrl, found.cik, found.filedDate);
-  return detail.tranches.find((t) => t.isin === isin) ?? detail.tranches[0] ?? null;
+  const matched = detail.tranches.find((t) => t.isin === isin);
+  if (matched) return matched;
+  // ISIN이 어느 트랜치에도 매칭되지 않으면: 단일 트랜치 문서는 전문검색이 이
+  // ISIN으로 찾은 문서이므로 그 트랜치를 쓰고, 다중 트랜치면 다른 트랜치의
+  // 콜/풋을 이 채권에 반영하지 않도록 null("확인 불가")로 돌린다(감사 F5).
+  return detail.tranches.length === 1 ? detail.tranches[0] : null;
 }
 
 /** 같은 회사가 FWP와 비슷한 시점에 낸 424B(본 증권신고서)에서 day-count 관용구를 찾는다 */

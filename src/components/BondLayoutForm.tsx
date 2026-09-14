@@ -576,8 +576,17 @@ export function BondLayoutForm({
           parCallDate: string | null;
           makeWholeSpreadBps: number | null;
           putDate: string | null;
+          callAbsentConfirmed?: boolean;
+          putAbsentConfirmed?: boolean;
         };
       };
+      // 응답이 오는 동안 종목이 바뀌었거나(ISIN 불일치) 사용자가 체크를
+      // 이미 껐으면 이 결과는 폐기한다 — stale closure로 되살리거나 다른
+      // 입력을 덮어쓰지 않도록(감사 F5).
+      const now = latestValue.current;
+      const stillOn = kind === "call" ? now.hasCall : now.hasPut;
+      if (now.isin !== next.isin || !stillOn) return;
+
       if (!res.ok || !data.found || !data.tranche) {
         setCallPutStatus(
           `자동확인 불가 — 공시서류를 찾지 못했습니다. ${label}을(를) 직접 입력해 주세요.`
@@ -586,29 +595,51 @@ export function BondLayoutForm({
       }
       const t = data.tranche;
       if (kind === "call") {
-        const confirmed = t.parCallDate !== null || t.makeWholeSpreadBps !== null;
-        if (!confirmed) {
-          onChange({ ...next, hasCall: false });
+        const found = t.parCallDate !== null || t.makeWholeSpreadBps !== null;
+        if (found) {
+          onChange((prev) => ({
+            ...prev,
+            parCallDate: t.parCallDate ?? prev.parCallDate,
+            makeWholeSpreadBps:
+              t.makeWholeSpreadBps != null
+                ? String(t.makeWholeSpreadBps)
+                : prev.makeWholeSpreadBps,
+          }));
+          setCallPutStatus("공시서류에서 콜조항을 확인해 반영했습니다.");
+        } else if (t.callAbsentConfirmed) {
+          // 문서가 "콜 없음"을 명시한 경우에만 경고 + 체크 해제.
+          onChange((prev) => ({
+            ...prev,
+            hasCall: false,
+            callScenario:
+              prev.callScenario === "parCall" || prev.callScenario === "makeWhole"
+                ? "hold"
+                : prev.callScenario,
+          }));
           setCallPutStatus("공시서류를 확인했으나 콜조항이 없는 것으로 확인됩니다.");
-          return;
+        } else {
+          // 문서는 찾았지만 조항을 못 읽음(서식 미지원 등) — "없음"으로 단정하지 않는다.
+          setCallPutStatus(
+            "공시서류는 찾았으나 콜조항을 자동으로 읽지 못했습니다. 원문을 확인해 직접 입력해 주세요."
+          );
         }
-        onChange({
-          ...next,
-          parCallDate: t.parCallDate ?? next.parCallDate,
-          makeWholeSpreadBps:
-            t.makeWholeSpreadBps != null
-              ? String(t.makeWholeSpreadBps)
-              : next.makeWholeSpreadBps,
-        });
-        setCallPutStatus("공시서류에서 콜조항을 확인해 반영했습니다.");
       } else {
-        if (t.putDate === null) {
-          onChange({ ...next, hasPut: false });
+        if (t.putDate !== null) {
+          const putDate = t.putDate;
+          onChange((prev) => ({ ...prev, putDate }));
+          setCallPutStatus("공시서류에서 풋옵션을 확인해 반영했습니다.");
+        } else if (t.putAbsentConfirmed) {
+          onChange((prev) => ({
+            ...prev,
+            hasPut: false,
+            callScenario: prev.callScenario === "put" ? "hold" : prev.callScenario,
+          }));
           setCallPutStatus("공시서류를 확인했으나 풋옵션이 없는 것으로 확인됩니다.");
-          return;
+        } else {
+          setCallPutStatus(
+            "공시서류는 찾았으나 풋옵션을 자동으로 읽지 못했습니다. 원문을 확인해 직접 입력해 주세요."
+          );
         }
-        onChange({ ...next, putDate: t.putDate });
-        setCallPutStatus("공시서류에서 풋옵션을 확인해 반영했습니다.");
       }
     } catch {
       setCallPutStatus(
