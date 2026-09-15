@@ -1,10 +1,17 @@
 import { getRedis } from "@/lib/server/redis";
+import { isSettlementBusinessDay } from "@/lib/settlementCalendar";
 
 const USER_AGENT =
   "ChaeGwonSesangBondApp research-contact@chaegwonsesang.example";
-const TTL_MS = 6 * 60 * 60 * 1000;
+// 캐시는 시간(TTL)이 아니라 "재무부가 새 영업일 곡선을 발표했는가"로 판단한다
+// (감사 Q4 — 예전엔 메모리 6h·Redis 24h TTL이라 한국 오전에 전날 곡선을 하루
+// 늦게 쓰는 일이 있었다). 발표 시각 이후 아직 새 곡선이 안 올라온 경우(재무부
+// 지연)에는 RETRY_MS 동안 재조회를 참아 요청이 몰리지 않게 한다.
+const RETRY_MS = 30 * 60 * 1000;
 const REDIS_KEY = "us-treasury-yield-curve-v1";
 const REDIS_TTL_SECONDS = 24 * 60 * 60;
+/** 재무부 일별 곡선 발표 시각(미 동부 15:30~16:00) 이후로 보는 기준 시(ET). */
+const PUBLISH_HOUR_ET = 17;
 
 // 타입·보간은 클라이언트와 공유하는 순수 모듈(@/lib/yieldCurve)에 있다.
 import type { TreasuryParYieldCurve, YieldCurvePoint } from "@/lib/yieldCurve";
@@ -29,6 +36,38 @@ const TENOR_YEARS: Record<string, number> = {
 };
 
 let cached: { curve: TreasuryParYieldCurve; fetchedAt: number } | null = null;
+
+/** now를 미 동부 시간으로 본 (연, 월, 일, 시). */
+function easternParts(now: Date): { y: number; m: number; d: number; h: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+  }).formatToParts(now);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  return { y: get("year"), m: get("month"), d: get("day"), h: get("hour") };
+}
+
+/**
+ * 지금 시점에 재무부 사이트에 올라와 있어야 할 가장 최근 곡선 날짜(YYYY-MM-DD).
+ * 동부시간 PUBLISH_HOUR_ET 이후면 오늘, 아니면 어제부터 거슬러 올라가 미국
+ * 채권시장 영업일(주말·SIFMA 휴장일 제외)을 찾는다.
+ */
+export function latestPublishedCurveDate(now: Date = new Date()): string {
+  const et = easternParts(now);
+  const d = new Date(Date.UTC(et.y, et.m - 1, et.d));
+  if (et.h < PUBLISH_HOUR_ET) d.setUTCDate(d.getUTCDate() - 1);
+  while (!isSettlementBusinessDay(d, "US")) d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/** 캐시된 곡선이 아직 최신인가 — 곡선 날짜가 발표됐어야 할 날짜 이상이면 최신. */
+export function isCurveFresh(curve: TreasuryParYieldCurve, now: Date = new Date()): boolean {
+  return curve.date >= latestPublishedCurveDate(now);
+}
 
 function monthParam(d: Date): string {
   return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
@@ -81,14 +120,20 @@ function parseCurve(xml: string): TreasuryParYieldCurve | null {
  * treasuryFiscalData와 동일하게 Redis에도 캐시한다.
  */
 export async function getTreasuryParYieldCurve(): Promise<TreasuryParYieldCurve | null> {
-  if (cached && Date.now() - cached.fetchedAt < TTL_MS) return cached.curve;
+  const now = new Date();
+  if (cached) {
+    if (isCurveFresh(cached.curve, now)) return cached.curve;
+    // 새 곡선이 나왔어야 하는데 아직 못 받은 상태 — 최근에 확인했으면 재시도를 미룬다.
+    if (now.getTime() - cached.fetchedAt < RETRY_MS) return cached.curve;
+  }
 
   const redis = getRedis();
+  let fromRedis: TreasuryParYieldCurve | null = null;
   if (redis) {
     try {
-      const fromRedis = await redis.get<TreasuryParYieldCurve>(REDIS_KEY);
-      if (fromRedis) {
-        cached = { curve: fromRedis, fetchedAt: Date.now() };
+      fromRedis = await redis.get<TreasuryParYieldCurve>(REDIS_KEY);
+      if (fromRedis && isCurveFresh(fromRedis, now)) {
+        cached = { curve: fromRedis, fetchedAt: now.getTime() };
         return fromRedis;
       }
     } catch {
@@ -96,7 +141,6 @@ export async function getTreasuryParYieldCurve(): Promise<TreasuryParYieldCurve 
     }
   }
 
-  const now = new Date();
   const prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
   let curve: TreasuryParYieldCurve | null = null;
   for (const yyyymm of [monthParam(now), monthParam(prev)]) {
@@ -107,9 +151,16 @@ export async function getTreasuryParYieldCurve(): Promise<TreasuryParYieldCurve 
       // 다음 달로 폴백
     }
   }
-  if (!curve) return null;
+  if (!curve) {
+    // 원본 조회 실패 — 묵은 곡선이라도 있으면 그걸 쓴다(화면에 기준일이 표시됨).
+    const fallback = cached?.curve ?? fromRedis;
+    if (fallback) cached = { curve: fallback, fetchedAt: now.getTime() };
+    return fallback;
+  }
 
-  cached = { curve, fetchedAt: Date.now() };
+  // 재무부가 아직 새 날짜를 안 올렸으면(지연) 받은 곡선은 이전 날짜 그대로다 —
+  // fetchedAt으로 RETRY_MS 동안 재조회를 막는다.
+  cached = { curve, fetchedAt: now.getTime() };
   if (redis) {
     redis.set(REDIS_KEY, curve, { ex: REDIS_TTL_SECONDS }).catch(() => {});
   }
