@@ -173,13 +173,24 @@ export default function Home() {
               채권정보만 입력하면 현금흐름을 보여주는 서비스
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className="shrink-0 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            출력
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {/* 프로젝트 5(글로벌 리서치)의 거시경제 화면. 새 탭으로 연다. */}
+            <a
+              href="https://5-topaz-five.vercel.app/macro"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              거시경제
+            </a>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              출력
+            </button>
+          </div>
         </header>
 
         <div className="flex flex-col gap-6 print:gap-2">
