@@ -865,7 +865,7 @@ export function BondLayoutForm({
                 : "inline-flex w-fit items-center gap-1 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-white dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:disabled:hover:bg-zinc-900"
             }
           >
-            {locked ? "🔒 정보잠김 (해제)" : "🔓 정보잠금"}
+            {locked ? "🔒 정보잠김" : "🔓 정보잠금"}
           </button>
           {(uploadStatus || linkStatus) && (
             <p className="ml-2 whitespace-nowrap text-xs text-zinc-500 dark:text-zinc-400">
