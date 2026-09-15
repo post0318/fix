@@ -756,6 +756,7 @@ export function BondLayoutForm({
                 {value.settlementDays.trim() !== "" ? (
                   <button
                     type="button"
+                    disabled={locked}
                     onClick={() => update("settlementDays", "")}
                     title="수기값을 지우고 시장 관행(미국 T+1·그 외 T+2)으로 되돌립니다"
                     className="shrink-0 rounded border border-zinc-300 px-1.5 py-0.5 text-[11px] font-normal text-zinc-500 hover:bg-white dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 print:hidden"
@@ -797,6 +798,7 @@ export function BondLayoutForm({
                     className={`${inputClass.replace("w-full ", "")} w-5 shrink-0 px-0 text-center print:hidden`}
                     type="text"
                     inputMode="numeric"
+                    disabled={locked}
                     value={
                       settlementDraft ??
                       (value.settlementDays === "" ? String(days) : value.settlementDays)
