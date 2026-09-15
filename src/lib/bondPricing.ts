@@ -344,6 +344,8 @@ export interface BondPricingInputs {
   purchaseFxRate: string;
   trustInvestmentAmount: string;
   frontFeeRate: string;
+  /** 결제일수(T+n 영업일). 생략/""이면 시장 관행 기본값. */
+  settlementDays?: string;
 }
 
 export interface BondPricingResult {
@@ -380,7 +382,12 @@ export function computeBondPricing(
     return null;
   }
 
-  const settlement = getSettlementDate(input.trustContractDate, input.calcBasis);
+  const settlement = getSettlementDate(
+    input.trustContractDate,
+    input.calcBasis,
+    input.tradeCurrency,
+    input.settlementDays
+  );
   if (!settlement) return null;
 
   // 국내 원화채권은 액면 10,000원당, 브라질 국채(ANBIMA 관행)는 액면 1,000당,
@@ -536,6 +543,7 @@ export interface EffectiveRedemptionInput {
   tradeCurrency: string;
   /** 상환일 하한 검증(결제일 이후여야 함)에 쓰인다. */
   trustContractDate: string;
+  settlementDays?: string;
 }
 
 /**
@@ -599,7 +607,12 @@ export function getEffectiveRedemption(
   // 상환일 하한 = 결제일. 하한 미검증이면 과거 콜일 입력 시 음수 이자·음수
   // 투자일수가 나온다(감사 #3). 결제일을 못 구하면 검증 없이 인정하지 않고
   // hold로 폴백한다.
-  const settlement = getSettlementDate(input.trustContractDate, input.calcBasis);
+  const settlement = getSettlementDate(
+    input.trustContractDate,
+    input.calcBasis,
+    input.tradeCurrency,
+    input.settlementDays
+  );
   if (!settlement) return hold;
 
   if (input.callScenario === "parCall") {

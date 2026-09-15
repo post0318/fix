@@ -166,6 +166,7 @@ function pack(value: BondLayoutInput): string {
     stripDateDashes(value.makeWholeRedemptionDate),
     value.makeWholeRefYield,
     value.isin,
+    value.settlementDays,
   ];
   return fields.map((f) => (f ?? "").replace(/\|/g, " ")).join("|");
 }
@@ -203,6 +204,7 @@ function unpack(text: string): Partial<BondLayoutInput> | null {
     makeWholeRedemptionDate,
     makeWholeRefYield,
     isin,
+    settlementDays,
   ] = parts;
 
   const result: Partial<BondLayoutInput> = {};
@@ -223,6 +225,7 @@ function unpack(text: string): Partial<BondLayoutInput> | null {
     result.makeWholeRedemptionDate = restoreDateDashes(makeWholeRedemptionDate);
   if (makeWholeRefYield) result.makeWholeRefYield = makeWholeRefYield;
   if (isin) result.isin = isin;
+  if (settlementDays && /^\d{1,2}$/.test(settlementDays)) result.settlementDays = settlementDays;
   if (callScenarioCode) {
     const scenario = CALL_SCENARIO_BY_CODE[Number(callScenarioCode)];
     if (scenario) result.callScenario = scenario;

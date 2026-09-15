@@ -45,6 +45,8 @@ export interface CashFlowScheduleInputs {
   backFeeRate: string;
   investorType: InvestorType;
   taxStatus: TaxStatus;
+  /** 결제일수(T+n 영업일). 생략/""이면 시장 관행 기본값. */
+  settlementDays?: string;
 
   // 콜/조기상환 시나리오. 모두 생략 가능하며, hasCall이 false이거나 시나리오
   // 입력이 불완전하면 만기보유(hold)로 계산된다.
@@ -105,6 +107,7 @@ export function generateFixCashFlow(
     calcBasis: input.calcBasis,
     tradeCurrency: input.tradeCurrency,
     trustContractDate: input.trustContractDate,
+    settlementDays: input.settlementDays,
   });
   const redemption = new Date(eff.redemptionDate);
   if (Number.isNaN(redemption.getTime())) return null;

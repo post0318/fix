@@ -1,5 +1,9 @@
 import { CalcBasis, CouponFrequency } from "@/types/bondLayout";
-import { isBrazilBusinessDay } from "@/lib/brazilCalendar";
+import {
+  addSettlementBusinessDays,
+  getSettlementCalendar,
+  resolveSettlementDays,
+} from "@/lib/settlementCalendar";
 
 const TRUST_MATURITY_LEAD_DAYS = 11;
 
@@ -51,33 +55,25 @@ export function toDateString(date: Date): string {
 }
 
 /**
- * 결제일 계산.
- * - 브라질 국채(Business/252): SELIC 결제 관례대로 D+0. 신탁계약일이 브라질
- *   영업일(토/일 + ANBIMA/B3 국경일 제외)이면 그날, 아니면 다음 영업일.
- * - 그 외(한국/미국 등): 신탁계약일로부터 영업일(토/일 제외) 2일 후 (WORKDAY,
- *   공휴일 미반영).
+ * 결제일 = 신탁계약일 + 영업일 n일. n은 화면의 "결제일(영업일)" 입력값이고,
+ * 비어 있으면 시장 관행(미국 T+1·브라질 D+0·그 외 T+2). 영업일은 거래통화
+ * 시장의 휴장 캘린더(한국 공휴일·미국 SIFMA 휴장일·브라질 ANBIMA)를 따른다 —
+ * 감사 F12 이전에는 T+2 고정·주말만 제외(엑셀 WORKDAY)였다.
+ *
+ * 실무에서는 규칙상 T+1이라도 매도상대방의 숏커버 지연 등으로 결제가 늦어지는
+ * 일이 잦아, 영업점이 n을 직접 고쳐 실제 결제일에 맞춘다(사용자 지시).
  */
 export function getSettlementDate(
   trustContractDate: string,
-  calcBasis?: CalcBasis
+  calcBasis?: CalcBasis,
+  tradeCurrency?: string,
+  settlementDays?: string
 ): Date | null {
   const start = new Date(trustContractDate);
   if (Number.isNaN(start.getTime())) return null;
-
-  if (calcBasis === "Business/252") {
-    let date = start;
-    while (!isBrazilBusinessDay(date)) date = addDays(date, 1);
-    return date;
-  }
-
-  let date = start;
-  let remaining = 2;
-  while (remaining > 0) {
-    date = addDays(date, 1);
-    const day = date.getUTCDay();
-    if (day !== 0 && day !== 6) remaining--;
-  }
-  return date;
+  const calendar = getSettlementCalendar(calcBasis, tradeCurrency);
+  const days = resolveSettlementDays(settlementDays, calcBasis, tradeCurrency);
+  return addSettlementBusinessDays(start, days, calendar);
 }
 
 export interface CouponPeriod {

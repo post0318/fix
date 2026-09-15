@@ -27,7 +27,9 @@ import {
   getSettlementDate,
   getTrustMaturityDate,
   getTrustMaturityLeadDays,
+  toDateString,
 } from "@/lib/couponSchedule";
+import { resolveSettlementDays } from "@/lib/settlementCalendar";
 import {
   computeBondPricing,
   getEffectiveRedemption,
@@ -347,6 +349,7 @@ export function BondLayoutForm({
         purchaseFxRate: value.purchaseFxRate,
         trustInvestmentAmount: value.trustInvestmentAmount,
         frontFeeRate: value.frontFeeRate,
+        settlementDays: value.settlementDays,
       }),
     [
       value.maturityDate,
@@ -361,6 +364,7 @@ export function BondLayoutForm({
       value.purchaseFxRate,
       value.trustInvestmentAmount,
       value.frontFeeRate,
+      value.settlementDays,
     ]
   );
 
@@ -380,6 +384,7 @@ export function BondLayoutForm({
         calcBasis: value.calcBasis,
         tradeCurrency: value.tradeCurrency,
         trustContractDate: value.trustContractDate,
+        settlementDays: value.settlementDays,
       }),
     [
       value.hasCall,
@@ -394,6 +399,7 @@ export function BondLayoutForm({
       value.calcBasis,
       value.tradeCurrency,
       value.trustContractDate,
+      value.settlementDays,
     ]
   );
 
@@ -422,6 +428,7 @@ export function BondLayoutForm({
         makeWholeRedemptionDate: value.makeWholeRedemptionDate,
         makeWholeRefYield: value.makeWholeRefYield,
         makeWholeSpreadBps: value.makeWholeSpreadBps,
+        settlementDays: value.settlementDays,
       }),
     [
       value.maturityDate,
@@ -446,6 +453,7 @@ export function BondLayoutForm({
       value.makeWholeRedemptionDate,
       value.makeWholeRefYield,
       value.makeWholeSpreadBps,
+      value.settlementDays,
     ]
   );
 
@@ -851,8 +859,12 @@ export function BondLayoutForm({
                 getRecentCouponDate(
                   value.maturityDate,
                   value.couponFrequency,
-                  getSettlementDate(value.trustContractDate, value.calcBasis) ??
-                    undefined
+                  getSettlementDate(
+                    value.trustContractDate,
+                    value.calcBasis,
+                    value.tradeCurrency,
+                    value.settlementDays
+                  ) ?? undefined
                 ) ||
                 ""
               }
@@ -1298,6 +1310,8 @@ export function BondLayoutForm({
               value={value.tradeCurrency}
               onChange={(e) => {
                 const tradeCurrency = e.target.value as Currency;
+                // 결제일수 기본값(T+1/T+2)과 휴장 캘린더가 통화 시장마다 다르므로
+                // 수기 결제일수는 통화를 바꾸면 자동으로 되돌린다.
                 if (tradeCurrency === value.custodyCurrency) {
                   onChange({
                     ...value,
@@ -1306,6 +1320,7 @@ export function BondLayoutForm({
                     maturityFxRate: "1",
                     trustInvestmentAmount:
                       tradeCurrency === "KRW" ? "100000000" : "1000000",
+                    settlementDays: "",
                   });
                   return;
                 }
@@ -1317,6 +1332,7 @@ export function BondLayoutForm({
                   maturityFxRate: "1",
                   trustInvestmentAmount:
                     tradeCurrency === "KRW" ? "100000000" : "1000000",
+                  settlementDays: "",
                 });
               }}
             >
@@ -1396,6 +1412,71 @@ export function BondLayoutForm({
               }
               onKeyDown={commitOnEnter}
             />
+          </Row>
+          <Row
+            // 결제일수는 달력이 아니라 숫자(T+n 영업일)로 입력한다 — 규칙상 T+1
+            // 이라도 상대방 숏커버 지연으로 결제가 늦어지는 일이 잦아 "5"처럼
+            // 실제 영업일수를 적는 편이 빠르다(사용자 지시). 비우면 시장 관행.
+            label={
+              <span className="flex items-center gap-2">
+                결제일
+                {value.settlementDays.trim() !== "" ? (
+                  <button
+                    type="button"
+                    onClick={() => update("settlementDays", "")}
+                    title="수기값을 지우고 시장 관행(미국 T+1·브라질 D+0·그 외 T+2)으로 되돌립니다"
+                    className="shrink-0 rounded border border-zinc-300 px-1.5 py-0.5 text-[11px] font-normal text-zinc-500 hover:bg-white dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 print:hidden"
+                  >
+                    자동
+                  </button>
+                ) : (
+                  <span
+                    title="시장 관행: 미국 T+1 · 브라질 D+0 · 그 외 T+2 (거래통화 시장 휴장일 반영)"
+                    className="shrink-0 text-[11px] font-normal italic text-zinc-400 dark:text-zinc-600 print:hidden"
+                  >
+                    자동
+                  </span>
+                )}
+              </span>
+            }
+            editable
+          >
+            {(() => {
+              const days = resolveSettlementDays(
+                value.settlementDays,
+                value.calcBasis,
+                value.tradeCurrency
+              );
+              const settlement = getSettlementDate(
+                value.trustContractDate,
+                value.calcBasis,
+                value.tradeCurrency,
+                value.settlementDays
+              );
+              return (
+                <span className="flex items-center gap-1 text-sm text-zinc-900 dark:text-zinc-100">
+                  <span className="shrink-0 text-zinc-500 dark:text-zinc-400">T+</span>
+                  <input
+                    className={`${inputClass} w-8 shrink-0 print:hidden`}
+                    type="text"
+                    inputMode="numeric"
+                    value={value.settlementDays === "" ? String(days) : value.settlementDays}
+                    onFocus={selectAllOnFocus}
+                    onChange={(e) => {
+                      if (/^\d{0,2}$/.test(e.target.value)) {
+                        update("settlementDays", e.target.value);
+                      }
+                    }}
+                    onKeyDown={commitOnEnter}
+                  />
+                  <span className="hidden print:inline">{days}</span>
+                  <span className="shrink-0 text-zinc-500 dark:text-zinc-400">영업일</span>
+                  <span className="ml-1 shrink-0">
+                    {settlement ? toDateString(settlement) : "-"}
+                  </span>
+                </span>
+              );
+            })()}
           </Row>
           <Row
             // "자동" 배지/복원 버튼은 값 칸이 아니라 라벨 옆에 둔다 — 값 칸에

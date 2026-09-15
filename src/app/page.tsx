@@ -23,6 +23,7 @@ function scenarioNote(input: BondLayoutInput): string | null {
     calcBasis: input.calcBasis,
     tradeCurrency: input.tradeCurrency,
     trustContractDate: input.trustContractDate,
+    settlementDays: input.settlementDays,
   });
   if (eff.applied === "parCall") {
     return `시나리오: Par Call 행사 · ${eff.redemptionDate} 액면상환`;
@@ -74,6 +75,7 @@ function createDefaultInput(): BondLayoutInput {
     makeWholeRedemptionDate: "",
     makeWholeRefYield: "",
     isin: "",
+    settlementDays: "",
   };
 }
 
@@ -120,6 +122,7 @@ export default function Home() {
         makeWholeRedemptionDate: input.makeWholeRedemptionDate,
         makeWholeRefYield: input.makeWholeRefYield,
         makeWholeSpreadBps: input.makeWholeSpreadBps,
+        settlementDays: input.settlementDays,
       }),
     [
       input.maturityDate,
@@ -144,6 +147,7 @@ export default function Home() {
       input.makeWholeRedemptionDate,
       input.makeWholeRefYield,
       input.makeWholeSpreadBps,
+      input.settlementDays,
     ]
   );
 

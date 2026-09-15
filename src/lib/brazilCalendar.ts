@@ -8,7 +8,7 @@
  */
 
 /** 그레고리력 부활절(춘분 후 첫 만월 다음 일요일) 계산 - Anonymous Gregorian algorithm */
-function easterSunday(year: number): Date {
+export function easterSunday(year: number): Date {
   const a = year % 19;
   const b = Math.floor(year / 100);
   const c = year % 100;
