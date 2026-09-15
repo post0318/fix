@@ -328,7 +328,9 @@ export function BondLayoutForm({
   const [treasuryCurve, setTreasuryCurve] = useState<YieldCurve | null>(null);
   const [treasuryStatus, setTreasuryStatus] = useState<string | null>(null);
   // 콜조항 체크박스 재조회(검색 없이 켤 때) 상태 문구.
-  const [callPutStatus, setCallPutStatus] = useState<string | null>(null);
+  // 콜조항 재조회 결과의 짧은 안내. 폼 행이 아니라 종목을 반영한 검색창
+  // (종목검색/미국채권검색/한국채권검색) 옆에 표시한다(사용자 지시).
+  const [callNotice, setCallNotice] = useState<string | null>(null);
   // 결제일수 입력 중인 임시값. 엔터로만 확정되고, 엔터 없이 떠나면 버린다
   // (사용자 지시: "엔터를 누르지 않으면 디폴트").
   const [settlementDraft, setSettlementDraft] = useState<string | null>(null);
@@ -552,14 +554,11 @@ export function BondLayoutForm({
   // ISIN으로 공시서류를 다시 조회한다. next를 받아 한 번의 onChange로 반영해
   // 동시 입력을 덮어쓰지 않는다.
   const verifyCallTerms = async (next: BondLayoutInput) => {
-    const label = "콜조항";
     if (!next.isin) {
-      setCallPutStatus(
-        `자동확인 불가 — ISIN 정보가 없어 ${label}을(를) 직접 입력해 주세요.`
-      );
+      setCallNotice("콜옵션 확인불가");
       return;
     }
-    setCallPutStatus("공시서류 확인 중...");
+    setCallNotice("콜옵션 확인 중");
     try {
       const res = await fetch(
         `/api/us-bond-terms?isin=${encodeURIComponent(next.isin)}`
@@ -580,9 +579,7 @@ export function BondLayoutForm({
       if (now.isin !== next.isin || !now.hasCall) return;
 
       if (!res.ok || !data.found || !data.tranche) {
-        setCallPutStatus(
-          `자동확인 불가 — 공시서류를 찾지 못했습니다. ${label}을(를) 직접 입력해 주세요.`
-        );
+        setCallNotice("콜옵션 확인불가");
         return;
       }
       const t = data.tranche;
@@ -596,7 +593,7 @@ export function BondLayoutForm({
               ? String(t.makeWholeSpreadBps)
               : prev.makeWholeSpreadBps,
         }));
-        setCallPutStatus("공시서류에서 콜조항을 확인해 반영했습니다.");
+        setCallNotice(null);
         setAutoTermsNote(autoTermsNoteText(t.redemptionText));
       } else if (t.callAbsentConfirmed) {
         // 문서가 "콜 없음"을 명시한 경우에만 경고 + 체크 해제.
@@ -608,17 +605,13 @@ export function BondLayoutForm({
               ? "hold"
               : prev.callScenario,
         }));
-        setCallPutStatus("공시서류를 확인했으나 콜조항이 없는 것으로 확인됩니다.");
+        setCallNotice("콜옵션 없음");
       } else {
         // 문서는 찾았지만 조항을 못 읽음(서식 미지원 등) — "없음"으로 단정하지 않는다.
-        setCallPutStatus(
-          "공시서류는 찾았으나 콜조항을 자동으로 읽지 못했습니다. 원문을 확인해 직접 입력해 주세요."
-        );
+        setCallNotice("콜옵션 확인불가");
       }
     } catch {
-      setCallPutStatus(
-        `자동확인 중 오류가 발생했습니다. ${label}을(를) 직접 입력해 주세요.`
-      );
+      setCallNotice("콜옵션 확인불가");
     }
   };
 
@@ -675,8 +668,10 @@ export function BondLayoutForm({
         <BondSearchBox
           disabled={lockToggleDisabled}
           active={activeSearchBox === "general"}
+          notice={callNotice}
           onApply={(fields) => {
             setActiveSearchBox("general");
+            setCallNotice(null);
             onLockedChange(false);
             setDisclosureRating(false);
             setAutoTermsNote(null);
@@ -686,8 +681,10 @@ export function BondLayoutForm({
         <UsBondSearchBox
           disabled={lockToggleDisabled}
           active={activeSearchBox === "us"}
+          notice={callNotice}
           onApply={(fields, meta) => {
             setActiveSearchBox("us");
+            setCallNotice(null);
             onLockedChange(false);
             if (meta?.disclosureRating !== undefined) {
               setDisclosureRating(meta.disclosureRating);
@@ -705,8 +702,10 @@ export function BondLayoutForm({
         <KoreaBondSearchBox
           disabled={lockToggleDisabled}
           active={activeSearchBox === "kr"}
+          notice={callNotice}
           onApply={(fields) => {
             setActiveSearchBox("kr");
+            setCallNotice(null);
             onLockedChange(false);
             setDisclosureRating(false);
             setAutoTermsNote(null);
@@ -1041,6 +1040,7 @@ export function BondLayoutForm({
                   };
                   onChange(next);
                   if (checked) void verifyCallTerms(next);
+                  else setCallNotice(null);
                 }}
               />
               <span>{value.hasCall ? "있음" : "없음"}</span>
@@ -1101,16 +1101,6 @@ export function BondLayoutForm({
             </Row>
           )}
 
-          {/* 재조회 상태 문구는 시나리오 행 아래에 둔다(사용자 지시). 콜조항이
-              자동 해제된 경우("없음 확인")에는 시나리오 행이 없으므로 여기 표시. */}
-          {callPutStatus && !value.hasCall && (
-            <Row label="">
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                {callPutStatus}
-              </span>
-            </Row>
-          )}
-
           {value.hasCall && (
             <>
               <Row label="시나리오" editable tall>
@@ -1138,14 +1128,6 @@ export function BondLayoutForm({
                   ))}
                 </div>
               </Row>
-
-              {callPutStatus && (
-                <Row label="">
-                  <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                    {callPutStatus}
-                  </span>
-                </Row>
-              )}
 
               {value.callScenario === "makeWhole" && (
                 <>

@@ -62,6 +62,8 @@ function frequencyFromMonths(months: number | null): CouponFrequency | null {
 interface BondSearchBoxProps {
   disabled: boolean;
   active: boolean;
+  /** 폼에서 내려주는 짧은 안내(예: 콜옵션 확인불가). 이 검색으로 반영된 종목일 때만 표시. */
+  notice?: string | null;
   onApply: (fields: Partial<BondLayoutInput>) => void;
 }
 
@@ -76,7 +78,12 @@ interface BondSearchBoxProps {
  * tradingeconomics.com에서 국가신용등급을 가져와 자동 반영한다(한국채권검색의
  * 국고채권, 미국채권검색의 U.S. Treasury와 동일한 취급).
  */
-export function BondSearchBox({ disabled, active, onApply }: BondSearchBoxProps) {
+export function BondSearchBox({
+  disabled,
+  active,
+  onApply,
+  notice = null,
+}: BondSearchBoxProps) {
   const [open, setOpen] = useState(false);
   const [issuers, setIssuers] = useState<string[] | null>(null);
   const [issuersError, setIssuersError] = useState<string | null>(null);
@@ -487,6 +494,9 @@ export function BondSearchBox({ disabled, active, onApply }: BondSearchBoxProps)
 
       {active && status && !open && (
         <p className="text-xs text-zinc-500 dark:text-zinc-400">{status}</p>
+      )}
+      {active && notice && !open && (
+        <p className="text-xs text-red-600 dark:text-red-400">{notice}</p>
       )}
     </div>
   );

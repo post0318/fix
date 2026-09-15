@@ -142,6 +142,8 @@ function cusipFromIsin(isin: string): string {
 interface UsBondSearchBoxProps {
   disabled: boolean;
   active: boolean;
+  /** 폼에서 내려주는 짧은 안내(예: 콜옵션 확인불가). 이 검색으로 반영된 종목일 때만 표시. */
+  notice?: string | null;
   // disclosureRating: 신용등급이 SEC 공시서류(FWP) 기준 값인지 여부.
   // 국채(RF/실시간 국가등급)나 값을 못 찾은 경우는 false.
   onApply: (
@@ -170,7 +172,12 @@ interface UsBondSearchBoxProps {
  * 국고채권과 동일한 취급, 조회 지연에 대비해 우선 "RF"를 반영해두고 성공 시
  * 실제 등급으로 갱신).
  */
-export function UsBondSearchBox({ disabled, active, onApply }: UsBondSearchBoxProps) {
+export function UsBondSearchBox({
+  disabled,
+  active,
+  onApply,
+  notice = null,
+}: UsBondSearchBoxProps) {
   const [open, setOpen] = useState(false);
   const [companies, setCompanies] = useState<CompanyInfo[] | null>(null);
   const [companiesError, setCompaniesError] = useState<string | null>(null);
@@ -577,6 +584,9 @@ export function UsBondSearchBox({ disabled, active, onApply }: UsBondSearchBoxPr
         </div>
       )}
 
+      {active && notice && !open && (
+        <p className="text-xs text-red-600 dark:text-red-400">{notice}</p>
+      )}
       {active && (status || ratingLink) && !open && (
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           {status}

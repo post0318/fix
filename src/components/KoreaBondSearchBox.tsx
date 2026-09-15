@@ -26,6 +26,8 @@ const COUPON_FREQUENCY_VALUES: CouponFrequency[] = ["3개월", "6개월", "12개
 interface KoreaBondSearchBoxProps {
   disabled: boolean;
   active: boolean;
+  /** 폼에서 내려주는 짧은 안내(예: 콜옵션 확인불가). 이 검색으로 반영된 종목일 때만 표시. */
+  notice?: string | null;
   onApply: (fields: Partial<BondLayoutInput>) => void;
 }
 
@@ -63,7 +65,12 @@ function seibroDetailUrl(bond: KoreaBondItem): string {
   return `https://seibro.or.kr/websquare/control.jsp?${params.toString()}`;
 }
 
-export function KoreaBondSearchBox({ disabled, active, onApply }: KoreaBondSearchBoxProps) {
+export function KoreaBondSearchBox({
+  disabled,
+  active,
+  onApply,
+  notice = null,
+}: KoreaBondSearchBoxProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [treasuryOnly, setTreasuryOnly] = useState(false);
@@ -291,6 +298,9 @@ export function KoreaBondSearchBox({ disabled, active, onApply }: KoreaBondSearc
         </div>
       )}
 
+      {active && notice && !open && (
+        <p className="text-xs text-red-600 dark:text-red-400">{notice}</p>
+      )}
       {active && ratingLink && !open && (
         <span className="inline-flex items-center gap-1.5">
           <a
