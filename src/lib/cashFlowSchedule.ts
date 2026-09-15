@@ -15,7 +15,7 @@ import {
   roundDown,
   yearFrac,
 } from "@/lib/bondPricing";
-import { getEffectiveIncomeTaxRate } from "@/lib/taxRules";
+import { computeWithholdingTax } from "@/lib/taxRules";
 
 export interface CashFlowRow {
   date: string;
@@ -226,10 +226,12 @@ export function generateFixCashFlow(
       : truncByCurrency(
           taxableIncome > totalDeduction ? taxableIncome - totalDeduction : 0
         );
-    const incomeTaxRate = getEffectiveIncomeTaxRate(input.taxStatus);
-    const incomeTax = isKrw
-      ? roundDown(taxBase * incomeTaxRate, -1)
-      : roundDown(taxBase * incomeTaxRate, 2);
+    // 소득세 14% 절사 → 그 값의 10%를 주민세로 다시 절사(fix.xlsx 석유공사_USD
+    // G/H열). 15.4%를 한 번에 곱해 절사하면 회차마다 1센트/10원씩 커진다(F10).
+    // 화면 열 구성은 그대로 — "소득세" 열에 소득세+주민세 합산을 표시한다.
+    // KRW는 원천징수 관행대로 10원 미만 절사, 그 외 통화는 소수 2자리 절사.
+    const truncTax = (n: number) => (isKrw ? roundDown(n, -1) : roundDown(n, 2));
+    const incomeTax = computeWithholdingTax(taxBase, input.taxStatus, truncTax).total;
     const specialTaxRate = input.investorType === "개인" ? 0.014 : 0.028;
     const specialTax =
       input.taxStatus === "비과세(농특세)"
