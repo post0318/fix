@@ -231,11 +231,13 @@ export function generateFixCashFlow(
     // KRW는 원천징수 관행대로 10원 미만 절사, 그 외 통화는 소수 2자리 절사.
     const truncTax = (n: number) => (isKrw ? roundDown(n, -1) : roundDown(n, 2));
     const incomeTax = computeWithholdingTax(taxBase, input.taxStatus, truncTax).total;
+    // 농특세(한국전력 7.95% 2096 전용)도 국세이므로 소득세와 같은 세액 절사
+    // (KRW 10원 미만·그 외 소수 2자리)를 쓴다. fix.xlsx 한국전력 시트 H열은
+    // F×1.4%를 절사 없이 두는데, 이는 정본 쪽 미절사(서식으로 가려짐)로 보고
+    // 절사를 따른다(사용자 결정 2026-09-15). 차이는 회차당 10원 미만.
     const specialTaxRate = input.investorType === "개인" ? 0.014 : 0.028;
     const specialTax =
-      input.taxStatus === "비과세(농특세)"
-        ? truncByCurrency(taxBase * specialTaxRate)
-        : null;
+      input.taxStatus === "비과세(농특세)" ? truncTax(taxBase * specialTaxRate) : null;
     const netAmount = truncByCurrency(
       interest - backFeeThisPeriod - incomeTax - (specialTax ?? 0)
     );
