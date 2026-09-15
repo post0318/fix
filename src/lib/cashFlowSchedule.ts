@@ -176,15 +176,20 @@ export function generateFixCashFlow(
   let carryBackFeeResidual = 0;
 
   dates.forEach((date, index) => {
-    // 마지막 행 = 원금상환일(만기 또는 콜). 콜이면 원금에 상환배수(make-whole
-    // 프리미엄)를 적용하고, 이표 그리드에 없는 상환일이면 쿠폰은 스텁(부분기간).
+    // 마지막 행 = 원금상환일(만기 또는 콜). 원금은 항상 액면이고, make-whole
+    // 프리미엄(액면 초과 상환액 = 조기상환보상금)은 이자에 얹는다 — 국내 세법상
+    // 개인·법인 모두 이자소득으로 분류(사용자 확정, 2026-09-16, 감사 Q1)되어
+    // 쿠폰과 같은 원천징수(소득세·주민세 절사)를 탄다. 이표 그리드에 없는
+    // 상환일이면 쿠폰은 스텁(부분기간).
     const isRedemption = index === dates.length - 1;
+    const premium = isRedemption
+      ? pricing.faceValue * (eff.redemptionPriceFactor - 1) * maturityFxRate
+      : 0;
     const periodCoupon =
-      isRedemption && stubRedemption ? couponAmount * stubFraction : couponAmount;
+      (isRedemption && stubRedemption ? couponAmount * stubFraction : couponAmount) +
+      premium;
     const principal = truncByCurrency(
-      isRedemption
-        ? pricing.faceValue * eff.redemptionPriceFactor * maturityFxRate
-        : 0
+      isRedemption ? pricing.faceValue * maturityFxRate : 0
     );
     const interest = truncByCurrency(periodCoupon);
 
