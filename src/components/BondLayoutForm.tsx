@@ -1092,7 +1092,9 @@ export function BondLayoutForm({
             </Row>
           )}
 
-          {callPutStatus && (
+          {/* 재조회 상태 문구는 시나리오 행 아래에 둔다(사용자 지시). 콜조항이
+              자동 해제된 경우("없음 확인")에는 시나리오 행이 없으므로 여기 표시. */}
+          {callPutStatus && !value.hasCall && (
             <Row label="">
               <span className="text-xs text-zinc-500 dark:text-zinc-400">
                 {callPutStatus}
@@ -1127,6 +1129,14 @@ export function BondLayoutForm({
                   ))}
                 </div>
               </Row>
+
+              {callPutStatus && (
+                <Row label="">
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                    {callPutStatus}
+                  </span>
+                </Row>
+              )}
 
               {value.callScenario === "makeWhole" && (
                 <>
