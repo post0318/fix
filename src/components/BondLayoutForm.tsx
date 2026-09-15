@@ -1124,11 +1124,16 @@ export function BondLayoutForm({
               {/* 자동추출 "추정" 문구는 시나리오 행 바로 아래 공란(라벨/값 칸 없이
                   한 줄 전체)에 둔다(사용자 지시). 인쇄엔 안 나온다. */}
               {autoTermsNote && (
-                <div className={`${blankCellClass} print:hidden`}>
-                  <span className="text-xs text-amber-700 dark:text-amber-400">
-                    <span className="mr-1 rounded border border-amber-400 px-1 text-[10px] font-semibold">
-                      추정
-                    </span>
+                <div
+                  // 줄바꿈 없이 한 줄로 두되 카드 폭을 넘는 부분은 "…"로 잘라
+                  // 박스 밖으로 새지 않게 한다. 전문은 마우스를 올리면(title) 보인다.
+                  className={`${blankCellClass} min-w-0 overflow-hidden print:hidden`}
+                  title={autoTermsNote}
+                >
+                  <span className="mr-1 shrink-0 rounded border border-amber-400 px-1 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+                    추정
+                  </span>
+                  <span className="min-w-0 truncate text-xs text-amber-700 dark:text-amber-400">
                     {autoTermsNote}
                   </span>
                 </div>
