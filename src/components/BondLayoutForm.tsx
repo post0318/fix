@@ -280,10 +280,6 @@ function ComputedValue() {
   );
 }
 
-function BlankValue() {
-  return <span>&nbsp;</span>;
-}
-
 /** 인쇄 시 select 대신 선택된 값만 텍스트로 보여준다 */
 function PrintValue({ value }: { value: string }) {
   return <span className="hidden print:inline">{value}</span>;
@@ -915,100 +911,199 @@ export function BondLayoutForm({
             </select>
             <PrintValue value={value.taxStatus} />
           </Row>
-          <Row label=" " blank>
-            <BlankValue />
-          </Row>
-          <Row label="거래통화" editable>
-            <select
-              className={`${inputClass} print:hidden`}
-              value={value.tradeCurrency}
-              onChange={(e) => {
-                const tradeCurrency = e.target.value as Currency;
-                if (tradeCurrency === value.custodyCurrency) {
-                  onChange({
+          <Row label="콜조항" editable>
+            <label className="flex items-center gap-2 text-sm text-zinc-900 dark:text-zinc-100">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-orange-600"
+                checked={value.hasCall}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  const next = {
                     ...value,
-                    tradeCurrency,
-                    purchaseFxRate: "1",
-                    maturityFxRate: "1",
-                    trustInvestmentAmount:
-                      tradeCurrency === "KRW" ? "100000000" : "1000000",
-                  });
-                  return;
-                }
-                onChange({
-                  ...value,
-                  tradeCurrency,
-                  custodyCurrency: tradeCurrency,
-                  purchaseFxRate: "1",
-                  maturityFxRate: "1",
-                  trustInvestmentAmount:
-                    tradeCurrency === "KRW" ? "100000000" : "1000000",
-                });
-              }}
-            >
-              {CURRENCY_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
-            <PrintValue value={value.tradeCurrency} />
+                    hasCall: checked,
+                    callScenario:
+                      !checked &&
+                      (value.callScenario === "parCall" ||
+                        value.callScenario === "makeWhole")
+                        ? ("hold" as CallScenario)
+                        : value.callScenario,
+                  };
+                  onChange(next);
+                  if (checked) void verifyCallTerms(next);
+                }}
+              />
+              <span>{value.hasCall ? "있음" : "없음"}</span>
+            </label>
           </Row>
-          <Row label="수탁통화" editable>
-            <select
-              className={`${inputClass} print:hidden`}
-              value={value.custodyCurrency}
-              onChange={(e) => {
-                const custodyCurrency = e.target.value as Currency;
-                if (custodyCurrency === value.tradeCurrency) {
-                  onChange({
-                    ...value,
-                    custodyCurrency,
-                    purchaseFxRate: "1",
-                    maturityFxRate: "1",
-                    trustInvestmentAmount:
-                      custodyCurrency === "KRW" ? "100000000" : "1000000",
-                  });
-                  return;
-                }
-                onChange({
-                  ...value,
-                  custodyCurrency,
-                  purchaseFxRate: "",
-                  maturityFxRate: "",
-                  trustInvestmentAmount:
-                    custodyCurrency === "KRW" ? "100000000" : "1000000",
-                });
-                // 거래통화와 수탁통화가 달라지면 환율을 직접 입력해야 하던
-                // 것을, 현재 환율을 자동 조회해 기본값으로 채워 넣는다
-                // (필요하면 사용자가 직접 수정 가능).
-                const tradeCurrency = value.tradeCurrency;
-                fetch(
-                  `/api/fx-rate?base=${encodeURIComponent(tradeCurrency)}&quote=${encodeURIComponent(custodyCurrency)}`
-                )
-                  .then((res) => res.json())
-                  .then((data: { rate?: number | null }) => {
-                    if (typeof data.rate === "number") {
-                      const rate = String(data.rate);
-                      onChange((prev) =>
-                        prev.tradeCurrency === tradeCurrency &&
-                        prev.custodyCurrency === custodyCurrency
-                          ? { ...prev, purchaseFxRate: rate, maturityFxRate: rate }
-                          : prev
-                      );
+
+          {value.hasCall && (
+            <>
+              <Row label="Par Call일" editable>
+                <input
+                  className={inputClass}
+                  type="date"
+                  value={value.parCallDate}
+                  onChange={(e) => {
+                    setAutoTermsNote(null);
+                    const next = {
+                      ...value,
+                      parCallDate: clampDateYear(e.target.value),
+                    };
+                    onChange(next);
+                    // par call일은 make-whole PV 지평(잔존만기)이므로 makeWhole
+                    // 시나리오 중이면 기준금리를 재보간한다(감사 F8).
+                    if (next.callScenario === "makeWhole") {
+                      void applyMakeWholeRate(next, true);
                     }
-                  })
-                  .catch(() => {});
-              }}
-            >
-              {CURRENCY_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
-            <PrintValue value={value.custodyCurrency} />
-          </Row>
+                  }}
+                  onKeyDown={commitOnEnter}
+                />
+              </Row>
+              <Row label="Make-Whole 스프레드(bp)" editable>
+                <input
+                  className={inputClass}
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="예: 15"
+                  value={value.makeWholeSpreadBps}
+                  onFocus={selectAllOnFocus}
+                  onChange={(e) => {
+                    if (PERCENT_INPUT_PATTERN.test(e.target.value)) {
+                      setAutoTermsNote(null);
+                      update("makeWholeSpreadBps", e.target.value);
+                    }
+                  }}
+                  onKeyDown={commitOnEnter}
+                />
+              </Row>
+            </>
+          )}
+
+          {autoTermsNote && value.hasCall && (
+            <Row label="">
+              <span className="text-xs text-amber-700 dark:text-amber-400 print:hidden">
+                <span className="mr-1 rounded border border-amber-400 px-1 text-[10px] font-semibold">
+                  추정
+                </span>
+                {autoTermsNote}
+              </span>
+            </Row>
+          )}
+
+          {callPutStatus && (
+            <Row label="">
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                {callPutStatus}
+              </span>
+            </Row>
+          )}
+
+          {value.hasCall && (
+            <>
+              <Row label="시나리오" editable>
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  {CALL_SCENARIO_LABELS.map((opt) => (
+                    <label
+                      key={opt.value}
+                      className="flex items-center gap-1.5 text-sm text-zinc-900 dark:text-zinc-100"
+                    >
+                      <input
+                        type="radio"
+                        name="callScenario"
+                        className="h-3.5 w-3.5 accent-orange-600"
+                        checked={value.callScenario === opt.value}
+                        onChange={() => {
+                          const next = { ...value, callScenario: opt.value };
+                          onChange(next);
+                          if (opt.value === "makeWhole") {
+                            void applyMakeWholeRate(next, false);
+                          }
+                        }}
+                      />
+                      <span>{opt.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </Row>
+
+              {value.callScenario === "makeWhole" && (
+                <>
+                  <Row label="Make-Whole 상환일" editable>
+                    <input
+                      className={inputClass}
+                      type="date"
+                      value={value.makeWholeRedemptionDate}
+                      onChange={(e) => {
+                        const next = {
+                          ...value,
+                          makeWholeRedemptionDate: clampDateYear(e.target.value),
+                        };
+                        onChange(next);
+                        // 상환일이 바뀌면 잔존만기가 달라지므로 항상 재보간(감사 F8).
+                        void applyMakeWholeRate(next, true);
+                      }}
+                      onKeyDown={commitOnEnter}
+                    />
+                  </Row>
+                  <Row label="기준 국채금리(%)" editable>
+                    <div className="flex w-full items-center gap-2">
+                      <input
+                        className={inputClass}
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="예: 4.250"
+                        value={value.makeWholeRefYield}
+                        onFocus={selectAllOnFocus}
+                        onChange={(e) => {
+                          if (/^\d*(\.\d{0,3})?$/.test(e.target.value)) {
+                            update("makeWholeRefYield", e.target.value);
+                          }
+                        }}
+                        onKeyDown={commitOnEnter}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void applyMakeWholeRate(value, true)}
+                        className="shrink-0 rounded border border-zinc-300 px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-white dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 print:hidden"
+                      >
+                        자동
+                      </button>
+                    </div>
+                  </Row>
+                  <Row label="Make-Whole 상환가">
+                    {effectiveRedemption.makeWholePricePer100 != null ? (
+                      <span className="text-sm text-zinc-900 dark:text-zinc-100">
+                        {effectiveRedemption.makeWholePricePer100.toFixed(3)}
+                        <span className="ml-1 text-xs text-zinc-400 dark:text-zinc-600">
+                          참고용 추정
+                        </span>
+                      </span>
+                    ) : (
+                      <ComputedValue />
+                    )}
+                  </Row>
+                  {treasuryStatus && (
+                    <Row label="">
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                        {treasuryStatus}
+                      </span>
+                    </Row>
+                  )}
+                </>
+              )}
+
+              {value.callScenario !== "hold" &&
+                effectiveRedemption.applied === "hold" && (
+                  <Row label="">
+                    <span className="text-xs text-amber-600 dark:text-amber-500">
+                      시나리오 입력(상환일·스프레드·기준금리 등)이 부족하거나
+                      결제일 이전 날짜라 만기보유로 계산 중입니다.
+                    </span>
+                  </Row>
+                )}
+            </>
+          )}
         </GroupCard>
 
         <GroupCard title="매수내역">
@@ -1196,6 +1291,97 @@ export function BondLayoutForm({
               }
               onKeyDown={commitOnEnter}
             />
+          </Row>
+          <Row label="거래통화" editable>
+            <select
+              className={`${inputClass} print:hidden`}
+              value={value.tradeCurrency}
+              onChange={(e) => {
+                const tradeCurrency = e.target.value as Currency;
+                if (tradeCurrency === value.custodyCurrency) {
+                  onChange({
+                    ...value,
+                    tradeCurrency,
+                    purchaseFxRate: "1",
+                    maturityFxRate: "1",
+                    trustInvestmentAmount:
+                      tradeCurrency === "KRW" ? "100000000" : "1000000",
+                  });
+                  return;
+                }
+                onChange({
+                  ...value,
+                  tradeCurrency,
+                  custodyCurrency: tradeCurrency,
+                  purchaseFxRate: "1",
+                  maturityFxRate: "1",
+                  trustInvestmentAmount:
+                    tradeCurrency === "KRW" ? "100000000" : "1000000",
+                });
+              }}
+            >
+              {CURRENCY_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            <PrintValue value={value.tradeCurrency} />
+          </Row>
+          <Row label="수탁통화" editable>
+            <select
+              className={`${inputClass} print:hidden`}
+              value={value.custodyCurrency}
+              onChange={(e) => {
+                const custodyCurrency = e.target.value as Currency;
+                if (custodyCurrency === value.tradeCurrency) {
+                  onChange({
+                    ...value,
+                    custodyCurrency,
+                    purchaseFxRate: "1",
+                    maturityFxRate: "1",
+                    trustInvestmentAmount:
+                      custodyCurrency === "KRW" ? "100000000" : "1000000",
+                  });
+                  return;
+                }
+                onChange({
+                  ...value,
+                  custodyCurrency,
+                  purchaseFxRate: "",
+                  maturityFxRate: "",
+                  trustInvestmentAmount:
+                    custodyCurrency === "KRW" ? "100000000" : "1000000",
+                });
+                // 거래통화와 수탁통화가 달라지면 환율을 직접 입력해야 하던
+                // 것을, 현재 환율을 자동 조회해 기본값으로 채워 넣는다
+                // (필요하면 사용자가 직접 수정 가능).
+                const tradeCurrency = value.tradeCurrency;
+                fetch(
+                  `/api/fx-rate?base=${encodeURIComponent(tradeCurrency)}&quote=${encodeURIComponent(custodyCurrency)}`
+                )
+                  .then((res) => res.json())
+                  .then((data: { rate?: number | null }) => {
+                    if (typeof data.rate === "number") {
+                      const rate = String(data.rate);
+                      onChange((prev) =>
+                        prev.tradeCurrency === tradeCurrency &&
+                        prev.custodyCurrency === custodyCurrency
+                          ? { ...prev, purchaseFxRate: rate, maturityFxRate: rate }
+                          : prev
+                      );
+                    }
+                  })
+                  .catch(() => {});
+              }}
+            >
+              {CURRENCY_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            <PrintValue value={value.custodyCurrency} />
           </Row>
         </GroupCard>
 
@@ -1435,202 +1621,6 @@ export function BondLayoutForm({
               <ComputedValue />
             )}
           </Row>
-        </GroupCard>
-
-        <GroupCard title="콜 / 조기상환">
-          <Row label="콜조항" editable>
-            <label className="flex items-center gap-2 text-sm text-zinc-900 dark:text-zinc-100">
-              <input
-                type="checkbox"
-                className="h-4 w-4 accent-orange-600"
-                checked={value.hasCall}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  const next = {
-                    ...value,
-                    hasCall: checked,
-                    callScenario:
-                      !checked &&
-                      (value.callScenario === "parCall" ||
-                        value.callScenario === "makeWhole")
-                        ? ("hold" as CallScenario)
-                        : value.callScenario,
-                  };
-                  onChange(next);
-                  if (checked) void verifyCallTerms(next);
-                }}
-              />
-              <span>{value.hasCall ? "있음" : "없음"}</span>
-            </label>
-          </Row>
-
-          {value.hasCall && (
-            <>
-              <Row label="Par Call일" editable>
-                <input
-                  className={inputClass}
-                  type="date"
-                  value={value.parCallDate}
-                  onChange={(e) => {
-                    setAutoTermsNote(null);
-                    const next = {
-                      ...value,
-                      parCallDate: clampDateYear(e.target.value),
-                    };
-                    onChange(next);
-                    // par call일은 make-whole PV 지평(잔존만기)이므로 makeWhole
-                    // 시나리오 중이면 기준금리를 재보간한다(감사 F8).
-                    if (next.callScenario === "makeWhole") {
-                      void applyMakeWholeRate(next, true);
-                    }
-                  }}
-                  onKeyDown={commitOnEnter}
-                />
-              </Row>
-              <Row label="Make-Whole 스프레드(bp)" editable>
-                <input
-                  className={inputClass}
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="예: 15"
-                  value={value.makeWholeSpreadBps}
-                  onFocus={selectAllOnFocus}
-                  onChange={(e) => {
-                    if (PERCENT_INPUT_PATTERN.test(e.target.value)) {
-                      setAutoTermsNote(null);
-                      update("makeWholeSpreadBps", e.target.value);
-                    }
-                  }}
-                  onKeyDown={commitOnEnter}
-                />
-              </Row>
-            </>
-          )}
-
-          {autoTermsNote && value.hasCall && (
-            <Row label="">
-              <span className="text-xs text-amber-700 dark:text-amber-400 print:hidden">
-                <span className="mr-1 rounded border border-amber-400 px-1 text-[10px] font-semibold">
-                  추정
-                </span>
-                {autoTermsNote}
-              </span>
-            </Row>
-          )}
-
-          {callPutStatus && (
-            <Row label="">
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                {callPutStatus}
-              </span>
-            </Row>
-          )}
-
-          {value.hasCall && (
-            <>
-              <Row label="시나리오" editable>
-                <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  {CALL_SCENARIO_LABELS.map((opt) => (
-                    <label
-                      key={opt.value}
-                      className="flex items-center gap-1.5 text-sm text-zinc-900 dark:text-zinc-100"
-                    >
-                      <input
-                        type="radio"
-                        name="callScenario"
-                        className="h-3.5 w-3.5 accent-orange-600"
-                        checked={value.callScenario === opt.value}
-                        onChange={() => {
-                          const next = { ...value, callScenario: opt.value };
-                          onChange(next);
-                          if (opt.value === "makeWhole") {
-                            void applyMakeWholeRate(next, false);
-                          }
-                        }}
-                      />
-                      <span>{opt.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </Row>
-
-              {value.callScenario === "makeWhole" && (
-                <>
-                  <Row label="Make-Whole 상환일" editable>
-                    <input
-                      className={inputClass}
-                      type="date"
-                      value={value.makeWholeRedemptionDate}
-                      onChange={(e) => {
-                        const next = {
-                          ...value,
-                          makeWholeRedemptionDate: clampDateYear(e.target.value),
-                        };
-                        onChange(next);
-                        // 상환일이 바뀌면 잔존만기가 달라지므로 항상 재보간(감사 F8).
-                        void applyMakeWholeRate(next, true);
-                      }}
-                      onKeyDown={commitOnEnter}
-                    />
-                  </Row>
-                  <Row label="기준 국채금리(%)" editable>
-                    <div className="flex w-full items-center gap-2">
-                      <input
-                        className={inputClass}
-                        type="text"
-                        inputMode="decimal"
-                        placeholder="예: 4.250"
-                        value={value.makeWholeRefYield}
-                        onFocus={selectAllOnFocus}
-                        onChange={(e) => {
-                          if (/^\d*(\.\d{0,3})?$/.test(e.target.value)) {
-                            update("makeWholeRefYield", e.target.value);
-                          }
-                        }}
-                        onKeyDown={commitOnEnter}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void applyMakeWholeRate(value, true)}
-                        className="shrink-0 rounded border border-zinc-300 px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-white dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 print:hidden"
-                      >
-                        자동
-                      </button>
-                    </div>
-                  </Row>
-                  <Row label="Make-Whole 상환가">
-                    {effectiveRedemption.makeWholePricePer100 != null ? (
-                      <span className="text-sm text-zinc-900 dark:text-zinc-100">
-                        {effectiveRedemption.makeWholePricePer100.toFixed(3)}
-                        <span className="ml-1 text-xs text-zinc-400 dark:text-zinc-600">
-                          참고용 추정
-                        </span>
-                      </span>
-                    ) : (
-                      <ComputedValue />
-                    )}
-                  </Row>
-                  {treasuryStatus && (
-                    <Row label="">
-                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                        {treasuryStatus}
-                      </span>
-                    </Row>
-                  )}
-                </>
-              )}
-
-              {value.callScenario !== "hold" &&
-                effectiveRedemption.applied === "hold" && (
-                  <Row label="">
-                    <span className="text-xs text-amber-600 dark:text-amber-500">
-                      시나리오 입력(상환일·스프레드·기준금리 등)이 부족하거나
-                      결제일 이전 날짜라 만기보유로 계산 중입니다.
-                    </span>
-                  </Row>
-                )}
-            </>
-          )}
         </GroupCard>
       </div>
     </section>
