@@ -150,8 +150,6 @@ interface BondLayoutFormProps {
   lockToggleDisabled?: boolean;
 }
 
-// Business/252(브라질 ANBIMA)는 채권세상에서 제외한다. 필요 시 프로젝트 4
-// 로직으로 다시 반영.
 const CALC_BASIS_OPTIONS: CalcBasis[] = [
   "미국 30/360",
   "ACT/ACT",
@@ -1424,14 +1422,14 @@ export function BondLayoutForm({
                   <button
                     type="button"
                     onClick={() => update("settlementDays", "")}
-                    title="수기값을 지우고 시장 관행(미국 T+1·브라질 D+0·그 외 T+2)으로 되돌립니다"
+                    title="수기값을 지우고 시장 관행(미국 T+1·그 외 T+2)으로 되돌립니다"
                     className="shrink-0 rounded border border-zinc-300 px-1.5 py-0.5 text-[11px] font-normal text-zinc-500 hover:bg-white dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 print:hidden"
                   >
                     자동
                   </button>
                 ) : (
                   <span
-                    title="시장 관행: 미국 T+1 · 브라질 D+0 · 그 외 T+2 (거래통화 시장 휴장일 반영)"
+                    title="시장 관행: 미국 T+1 · 그 외 T+2 (거래통화 시장 휴장일 반영)"
                     className="shrink-0 text-[11px] font-normal italic text-zinc-400 dark:text-zinc-600 print:hidden"
                   >
                     자동

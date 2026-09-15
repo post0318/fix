@@ -3,8 +3,7 @@ export type CalcBasis =
   | "ACT/ACT"
   | "ACT/360"
   | "ACT/365"
-  | "유럽 30/360"
-  | "Business/252";
+  | "유럽 30/360";
 
 export type InvestorType = "개인" | "일반법인" | "금융법인";
 
@@ -71,8 +70,7 @@ export interface BondLayoutInput {
   isin: string;
 
   /**
-   * 결제일수(T+n 영업일, 예 "1"·"5"). "" = 시장 관행 자동(미국 T+1·브라질 D+0·
-   * 그 외 T+2). 규칙상 T+1이라도 상대방 숏커버 지연 등으로 결제가 늦어지는
+   * 결제일수(T+n 영업일, 예 "1"·"5"). "" = 시장 관행 자동(미국 T+1·그 외 T+2). 규칙상 T+1이라도 상대방 숏커버 지연 등으로 결제가 늦어지는
    * 경우가 많아 영업점이 직접 고친다.
    */
   settlementDays: string;

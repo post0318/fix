@@ -9,7 +9,6 @@ import {
 import { FREQUENCY_MONTHS, addMonths } from "@/lib/couponSchedule";
 import {
   BASIS_INDEX,
-  anbimaCouponFactor,
   computeBondPricing,
   getEffectiveRedemption,
   roundDown,
@@ -160,15 +159,8 @@ export function generateFixCashFlow(
       ? yearFrac(prevGridCoupon, redemption, basisIdx) / fullPeriodFrac
       : 1;
 
-  // 브라질 국채(Business/252)는 표면금리를 단순 나눗셈이 아니라 복리로 환산한
-  // 반기 실효쿠폰을 지급한다(예: 연 10% -> 반기 4.880885%). 블룸버그 실제 값과
-  // 대조해 확인함(computeBrazilDirtyPrice 참고).
-  const couponAmount = roundDown(
-    input.calcBasis === "Business/252"
-      ? pricing.faceValue * anbimaCouponFactor(rate, freqPerYear)
-      : (rate * pricing.faceValue) / freqPerYear,
-    2
-  ) * maturityFxRate;
+  const couponAmount =
+    roundDown((rate * pricing.faceValue) / freqPerYear, 2) * maturityFxRate;
 
   // 화면에 보이는 현금흐름표 각 열(원금/이자/과세소득/과세표준/소득세/농특세/
   // 세후수령액)은 수탁통화가 KRW면 정수로, 그 외는 소수점 2자리까지 절사해
@@ -198,13 +190,9 @@ export function generateFixCashFlow(
 
     let taxableIncome: number;
     if (index === 0) {
-      // 경과이자(juros decorridos): 브라질은 ANBIMA 복리식(pricing.accruedInterest,
-      // BRL 액면통화 기준)을 수탁통화로 환산해 쓴다. 그 외는 쿠폰의 경과연수
-      // 프로레이트 — couponAmount와 같은 기준이라야 "이자-경과이자"가 일치한다.
-      const preOwnedInterest =
-        input.calcBasis === "Business/252"
-          ? roundDown(pricing.accruedInterest, 2) * maturityFxRate
-          : couponAmount * pricing.accrualFraction * freqPerYear;
+      // 경과이자 = 쿠폰의 경과연수 프로레이트 — couponAmount와 같은 기준이라야
+      // "이자-경과이자"가 일치한다.
+      const preOwnedInterest = couponAmount * pricing.accrualFraction * freqPerYear;
       taxableIncome = truncByCurrency(periodCoupon - preOwnedInterest);
     } else {
       taxableIncome = interest;

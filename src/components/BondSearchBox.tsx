@@ -234,7 +234,7 @@ export function BondSearchBox({ disabled, active, onApply }: BondSearchBoxProps)
         // 360-day year of twelve 30-day months"(미국식 30/360), "pay
         // interest semi-annually"(6개월 이표)로 명시돼 있어 동일하게
         // 반영한다. 둘 다 안 하면 이전에 다른 종목에서 남은 값(예:
-        // ACT/ACT나 Business/252)이 잘못 남을 수 있다.
+        // ACT/ACT)이 잘못 남을 수 있다.
         // boerse-frankfurt의 interestPaymentPeriod 필드는 거의 항상 null이라
         // 못 쓰지만, firstAnnualPayDate(첫 이자지급일)와 발행일 간격으로
         // 지급주기를 역산할 수 있다(getBondDetail에서 계산해 내려줌, 실제

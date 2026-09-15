@@ -6,7 +6,6 @@ import {
   getCouponPeriod,
   getSettlementDate,
 } from "@/lib/couponSchedule";
-import { brazilBusinessDaysBetween } from "@/lib/brazilCalendar";
 
 export const BASIS_INDEX: Record<CalcBasis, number> = {
   "미국 30/360": 0,
@@ -14,7 +13,6 @@ export const BASIS_INDEX: Record<CalcBasis, number> = {
   "ACT/360": 2,
   "ACT/365": 3,
   "유럽 30/360": 4,
-  "Business/252": 5,
 };
 
 function actualDays(start: Date, end: Date): number {
@@ -99,7 +97,7 @@ function yearFracActAct(start: Date, end: Date): number {
   return sign * sum;
 }
 
-/** YEARFRAC(start, end, basis) 근사 구현. basis: 0=미국30/360, 1=ACT/ACT, 2=ACT/360, 3=ACT/365, 4=유럽30/360, 5=Business/252(브라질) */
+/** YEARFRAC(start, end, basis) 근사 구현. basis: 0=미국30/360, 1=ACT/ACT, 2=ACT/360, 3=ACT/365, 4=유럽30/360 */
 export function yearFrac(start: Date, end: Date, basis: number): number {
   switch (basis) {
     case 0:
@@ -110,8 +108,6 @@ export function yearFrac(start: Date, end: Date, basis: number): number {
       return actualDays(start, end) / 365;
     case 4:
       return days360Eu(start, end) / 360;
-    case 5:
-      return brazilBusinessDaysBetween(start, end) / 252;
     case 1:
     default:
       return yearFracActAct(start, end);
@@ -128,38 +124,13 @@ export function roundUp(value: number, digits: number): number {
   return (Math.sign(value) || 1) * Math.ceil(Math.abs(value) * factor) / factor;
 }
 
-/**
- * 반기(등) 실효 표면이율 계수 [(1+연이율)^(1/periods) − 1].
- * ANBIMA "Caderno de Fórmulas — NTN-F"대로 백분율 기준 소수 6자리 반올림한다
- * (연 10% → 반기 4.880885% → per 1,000 face 48.80885). 블룸버그 실측과 대조 확인.
- */
-export function anbimaCouponFactor(
-  annualRateDec: number,
-  periodsPerYear: number
-): number {
-  return (
-    Math.round((Math.pow(1 + annualRateDec, 1 / periodsPerYear) - 1) * 1e8) / 1e8
-  );
-}
-
-/** ANBIMA: 브라질 국채 PU는 소수 6자리 절사(truncamento). */
-export function truncPu(value: number): number {
-  return Math.trunc(value * 1e6) / 1e6;
-}
-
-/**
- * 경과이자(juros decorridos). 브라질(Business/252)은 ANBIMA 관행대로 복리
- * VN×((1+표면금리)^(경과영업일/252)−1), 그 외 관행은 표면금리×경과연수(단리).
- */
+/** 경과이자 = 액면 × 표면금리 × 경과연수(단리). */
 function accruedInterestFor(
   notional: number,
   couponRateDec: number,
-  accrualFrac: number,
-  isBrazil: boolean
+  accrualFrac: number
 ): number {
-  return isBrazil
-    ? notional * (Math.pow(1 + couponRateDec, accrualFrac) - 1)
-    : notional * couponRateDec * accrualFrac;
+  return notional * couponRateDec * accrualFrac;
 }
 
 /**
@@ -278,59 +249,6 @@ export function impliedYieldFromPrice(
   return (lo + hi) / 2;
 }
 
-/** settlement 이후 다음 이표일부터 만기까지의 명목상(달력) 이표일 목록 */
-function brazilCouponDates(
-  settlement: Date,
-  maturity: Date,
-  frequency: CouponFrequency
-): Date[] {
-  const months = FREQUENCY_MONTHS[frequency];
-  // 이표일은 만기일 기준 months×k 개월(월말성 유지 — 연쇄 계산은 2월에서
-  // 월말성이 깨진다). settlement 이후 만기일까지.
-  const dates: Date[] = [maturity];
-  for (let k = 1; ; k++) {
-    const d = addMonths(maturity, -months * k);
-    if (d <= settlement) break;
-    dates.unshift(d);
-  }
-  return dates;
-}
-
-/**
- * 브라질 국채(NTN-F 등, Business/252) 전용 가격(=결제금액/dirty price) 계산.
- * 미국식 PRICE() 공식(days360Us 기반)과는 근본적으로 다른 ANBIMA 표준 공식을
- * 쓴다: 표면금리를 복리로 환산한 반기 실효쿠폰(예: 연 10% -> 반기 4.880885%,
- * "6개월마다 복리 환산 이자 지급")을 지급하고, 결제일부터 각 현금흐름까지의
- * 영업일수(Business/252)를 지수로 한 복리로 할인한다: PU = Σ CF/(1+수익률)^(영업일수/252).
- * 블룸버그 실제 값(NTN-F 2037, 수익률 14%, 2026-08-27 결제)과 대조해 0.04%
- * 이내로 일치함을 확인했다. computeCleanPrice(엑셀 PRICE 방식)를 그대로 쓰면
- * 이 특성을 반영하지 못해 3~5% 오차가 난다.
- */
-export function computeBrazilDirtyPrice(
-  settlement: Date,
-  maturity: Date,
-  annualRate: number,
-  annualYield: number,
-  redemption: number,
-  frequency: CouponFrequency
-): number | null {
-  if (settlement >= maturity) return null;
-
-  const f = FREQUENCY_PER_YEAR[frequency];
-  const coupon = redemption * anbimaCouponFactor(annualRate, f);
-  const dates = brazilCouponDates(settlement, maturity, frequency);
-  if (dates.length === 0) return null;
-
-  let pv = 0;
-  for (const date of dates) {
-    const isMaturity = date.getTime() === maturity.getTime();
-    const cashFlow = coupon + (isMaturity ? redemption : 0);
-    const businessDays = brazilBusinessDaysBetween(settlement, date);
-    pv += cashFlow / Math.pow(1 + annualYield, businessDays / 252);
-  }
-  return pv;
-}
-
 export interface BondPricingInputs {
   maturityDate: string;
   couponRate: string; // %
@@ -390,10 +308,9 @@ export function computeBondPricing(
   );
   if (!settlement) return null;
 
-  // 국내 원화채권은 액면 10,000원당, 브라질 국채(ANBIMA 관행)는 액면 1,000당,
-  // 그 외는 국제 관행대로 액면 100당 가격으로 계산한다.
-  const isBrazil = input.calcBasis === "Business/252";
-  const redemptionBasis = isBrazil ? 1000 : input.tradeCurrency === "KRW" ? 10000 : 100;
+  // 국내 원화채권은 액면 10,000원당, 그 외는 국제 관행대로 액면 100당 가격으로
+  // 계산한다.
+  const redemptionBasis = input.tradeCurrency === "KRW" ? 10000 : 100;
 
   const period = getCouponPeriod(maturity, input.couponFrequency, settlement);
   const recentCoupon = input.recentCouponDate
@@ -418,40 +335,21 @@ export function computeBondPricing(
         FREQUENCY_PER_YEAR[input.couponFrequency]
       : yearFrac(recentCoupon, settlement, basis);
 
-  let cleanPrice: number;
-  let dirtyPrice: number;
-
-  if (isBrazil) {
-    const dirtyRaw = computeBrazilDirtyPrice(
-      settlement,
-      maturity,
-      rate / 100,
-      yld / 100,
-      redemptionBasis,
-      input.couponFrequency
-    );
-    if (dirtyRaw === null) return null;
-    dirtyPrice = truncPu(dirtyRaw);
-    cleanPrice = truncPu(
-      dirtyPrice - accruedInterestFor(redemptionBasis, rate / 100, accrualFrac, true)
-    );
-  } else {
-    const cleanRaw = computeCleanPrice(
-      settlement,
-      maturity,
-      rate / 100,
-      yld / 100,
-      redemptionBasis,
-      input.couponFrequency,
-      basis
-    );
-    if (cleanRaw === null) return null;
-    cleanPrice = roundUp(cleanRaw, 4);
-    dirtyPrice = roundUp(
-      cleanPrice + accruedInterestFor(redemptionBasis, rate / 100, accrualFrac, false),
-      4
-    );
-  }
+  const cleanRaw = computeCleanPrice(
+    settlement,
+    maturity,
+    rate / 100,
+    yld / 100,
+    redemptionBasis,
+    input.couponFrequency,
+    basis
+  );
+  if (cleanRaw === null) return null;
+  const cleanPrice = roundUp(cleanRaw, 4);
+  const dirtyPrice = roundUp(
+    cleanPrice + accruedInterestFor(redemptionBasis, rate / 100, accrualFrac),
+    4
+  );
 
   const needsFx = input.tradeCurrency !== input.custodyCurrency;
   const fxRate = needsFx ? Number(input.purchaseFxRate) : 1;
@@ -465,12 +363,7 @@ export function computeBondPricing(
     -3
   );
 
-  const accruedInterest = accruedInterestFor(
-    faceValue,
-    rate / 100,
-    accrualFrac,
-    isBrazil
-  );
+  const accruedInterest = accruedInterestFor(faceValue, rate / 100, accrualFrac);
   const settlementAmountRaw = (faceValue * dirtyPrice) / redemptionBasis * fxRate;
   // 화면에 보이는 결제금액(수탁통화 KRW는 정수 절사, 그 외는 소수점 2자리
   // 절사)과 실제로 현금잔액 계산에 쓰는 값이 달라서
@@ -646,12 +539,7 @@ export function getEffectiveRedemption(
     return hold;
   }
 
-  const isBrazil = input.calcBasis === "Business/252";
-  const redemptionBasis = isBrazil
-    ? 1000
-    : input.tradeCurrency === "KRW"
-      ? 10000
-      : 100;
+  const redemptionBasis = input.tradeCurrency === "KRW" ? 10000 : 100;
 
   // 상환일이 par call일 이후면 par call 기간이라 make-whole 프리미엄 없이
   // 액면(100%) 상환이다(감사 F6 — 이전엔 만기까지 할인해 100.277 같은

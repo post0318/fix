@@ -6,7 +6,6 @@
  * 휴장일을 적용한다:
  * - KRW → 한국(관공서의 공휴일에 관한 규정 + 대체공휴일)
  * - USD → 미국 채권시장(SIFMA 권고 휴장일 ≈ 연방공휴일 + 성금요일)
- * - Business/252(브라질 국채) → ANBIMA/B3 (`brazilCalendar.ts`)
  * - 그 외 통화 → 주말만 제외
  *
  * 임시공휴일·선거일은 정부가 그때그때 지정하므로 아래 표에 알려진 것만 넣었다.
@@ -15,9 +14,28 @@
  * 모든 날짜는 UTC 자정 기준.
  */
 import { CalcBasis } from "@/types/bondLayout";
-import { easterSunday, isBrazilBusinessDay } from "@/lib/brazilCalendar";
 
-export type SettlementCalendar = "KR" | "US" | "BR" | "NONE";
+/** 그레고리력 부활절(춘분 후 첫 만월 다음 일요일) — Anonymous Gregorian algorithm */
+function easterSunday(year: number): Date {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const monthDay = h + l - 7 * m + 114;
+  const month = Math.floor(monthDay / 31); // 3 = March, 4 = April
+  const day = (monthDay % 31) + 1;
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+export type SettlementCalendar = "KR" | "US" | "NONE";
 
 function utc(year: number, month1: number, day: number): Date {
   return new Date(Date.UTC(year, month1 - 1, day));
@@ -197,14 +215,12 @@ export function getSettlementCalendar(
   calcBasis: CalcBasis | undefined,
   tradeCurrency: string | undefined
 ): SettlementCalendar {
-  if (calcBasis === "Business/252") return "BR";
   if (tradeCurrency === "KRW") return "KR";
   if (tradeCurrency === "USD") return "US";
   return "NONE";
 }
 
 export function isSettlementBusinessDay(date: Date, calendar: SettlementCalendar): boolean {
-  if (calendar === "BR") return isBrazilBusinessDay(date);
   if (isWeekend(date)) return false;
   if (calendar === "KR") return !koreanHolidaysOfYear(date.getUTCFullYear()).has(dateKey(date));
   if (calendar === "US") return !usHolidaysOfYear(date.getUTCFullYear()).has(dateKey(date));
@@ -213,7 +229,7 @@ export function isSettlementBusinessDay(date: Date, calendar: SettlementCalendar
 
 /**
  * start에서 영업일 days일 뒤. days=0이면 start가 휴장일일 때 다음 영업일로만
- * 옮긴다(브라질 D+0 관례).
+ * 옮긴다(D+0).
  */
 export function addSettlementBusinessDays(
   start: Date,
@@ -235,14 +251,13 @@ export function addSettlementBusinessDays(
 
 /**
  * 시장 관행 결제일수(T+n). 미국 채권은 2024-05-28부터 T+1(SEC Rule 15c6-1),
- * 브라질 국채는 D+0, 그 외(한국 등)는 T+2.
+ * 그 외(한국 등)는 T+2.
  */
 export function getDefaultSettlementDays(
   calcBasis: CalcBasis | undefined,
   tradeCurrency: string | undefined
 ): number {
   const calendar = getSettlementCalendar(calcBasis, tradeCurrency);
-  if (calendar === "BR") return 0;
   if (calendar === "US") return 1;
   return 2;
 }
