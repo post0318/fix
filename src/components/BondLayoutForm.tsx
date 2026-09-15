@@ -1090,17 +1090,6 @@ export function BondLayoutForm({
             </>
           )}
 
-          {autoTermsNote && value.hasCall && (
-            <Row label="">
-              <span className="text-xs text-amber-700 dark:text-amber-400 print:hidden">
-                <span className="mr-1 rounded border border-amber-400 px-1 text-[10px] font-semibold">
-                  추정
-                </span>
-                {autoTermsNote}
-              </span>
-            </Row>
-          )}
-
           {value.hasCall && (
             <>
               <Row label="시나리오" editable tall>
@@ -1131,6 +1120,19 @@ export function BondLayoutForm({
                   ))}
                 </div>
               </Row>
+
+              {/* 자동추출 "추정" 문구는 시나리오 행 바로 아래 공란(라벨/값 칸 없이
+                  한 줄 전체)에 둔다(사용자 지시). 인쇄엔 안 나온다. */}
+              {autoTermsNote && (
+                <div className={`${blankCellClass} print:hidden`}>
+                  <span className="text-xs text-amber-700 dark:text-amber-400">
+                    <span className="mr-1 rounded border border-amber-400 px-1 text-[10px] font-semibold">
+                      추정
+                    </span>
+                    {autoTermsNote}
+                  </span>
+                </div>
+              )}
 
               {value.callScenario === "makeWhole" && (
                 <>
