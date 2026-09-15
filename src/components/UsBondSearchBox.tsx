@@ -435,7 +435,7 @@ export function UsBondSearchBox({
             onApply({ purchaseYield: String(data.rate) });
             setStatus(
               baseStatus === "OK"
-                ? "매수금리는 현재가 기준 추정치입니다 — 체결 전 확인 바랍니다."
+                ? "매수금리는 현재가 기준 추정치입니다."
                 : `${baseStatus} 매수금리는 현재가 기준 추정치입니다.`
             );
           } else {
