@@ -396,6 +396,48 @@ export function computeBondPricing(
  * 비교한다. 결과는 참고용 추정치다 — 실제 make-whole 금리는 상환통지 시점의
  * H.15 CMT(잔존만기 보간)를 쓴다.
  */
+/**
+ * 미국식 make-whole 할인(감사 F14). 미국 회사채 프로스펙터스는 이표 주기와
+ * 무관하게 "discounted to the redemption date on a semi-annual basis (assuming
+ * a 360-day year consisting of twelve 30-day months)"로 고정한다(Apple·Meta·
+ * 브라질 USD 글로벌본드 원문 동일). computeCleanPrice는 채권 자체의 이표
+ * 주기로 복리하므로 반기 이표채는 이 함수와 동일하지만, 연 1회·분기 이표
+ * USD 채권은 ~15bp 어긋났다(실측: 4.5%/2033-05-15, 2028-08-01 상환, 3.65% —
+ * 연이표를 연복리로 103.660 vs 반기복리 참값 103.513).
+ *
+ * clean = Σ CF_k / (1 + y/2)^(2·T_k) − 경과이자,  T_k = 30/360 연수(상환일→지급일).
+ */
+function computeStreetCleanPrice(
+  settlement: Date,
+  maturity: Date,
+  annualRate: number,
+  annualYield: number,
+  redemption: number,
+  frequency: CouponFrequency
+): number | null {
+  if (settlement >= maturity) return null;
+  const f = FREQUENCY_PER_YEAR[frequency];
+  const months = FREQUENCY_MONTHS[frequency];
+  const { previousCouponDate, nextCouponDate, periodsRemaining } = getCouponPeriod(
+    maturity,
+    frequency,
+    settlement
+  );
+  const e = days360Us(previousCouponDate, nextCouponDate);
+  if (e === 0) return null;
+  const coupon = (redemption * annualRate) / f;
+
+  let pv = 0;
+  for (let k = 1; k <= periodsRemaining; k++) {
+    const payDate = addMonths(maturity, -months * (periodsRemaining - k));
+    const years = days360Us(settlement, payDate) / 360;
+    const cashFlow = coupon + (k === periodsRemaining ? redemption : 0);
+    pv += cashFlow / Math.pow(1 + annualYield / 2, 2 * years);
+  }
+  const accrued = coupon * (days360Us(previousCouponDate, settlement) / e);
+  return pv - accrued;
+}
+
 export function computeMakeWholePrice(
   redemptionDate: Date,
   maturity: Date,
@@ -404,20 +446,31 @@ export function computeMakeWholePrice(
   spreadBps: number,
   redemptionBasis: number,
   frequency: CouponFrequency,
-  basis = 0
+  basis = 0,
+  /** true면 미국식(반기 복리·30/360) 고정 할인 — USD 채권. false면 채권 자체의 이표 주기·basis. */
+  streetConvention = false
 ): number | null {
   if (redemptionDate >= maturity) return null;
   if (Number.isNaN(refYield) || Number.isNaN(spreadBps)) return null;
   const discountYield = refYield + spreadBps / 10000;
-  const clean = computeCleanPrice(
-    redemptionDate,
-    maturity,
-    annualRate,
-    discountYield,
-    redemptionBasis,
-    frequency,
-    basis
-  );
+  const clean = streetConvention
+    ? computeStreetCleanPrice(
+        redemptionDate,
+        maturity,
+        annualRate,
+        discountYield,
+        redemptionBasis,
+        frequency
+      )
+    : computeCleanPrice(
+        redemptionDate,
+        maturity,
+        annualRate,
+        discountYield,
+        redemptionBasis,
+        frequency,
+        basis
+      );
   if (clean === null) return null;
   return Math.max(redemptionBasis, clean);
 }
@@ -572,7 +625,10 @@ export function getEffectiveRedemption(
     spreadBps,
     redemptionBasis,
     input.couponFrequency,
-    BASIS_INDEX[input.calcBasis]
+    BASIS_INDEX[input.calcBasis],
+    // USD 채권은 프로스펙터스 관행대로 반기 복리·30/360 고정(감사 F14). EUR 등
+    // 연이표 유로본드는 문서가 연복리라 채권 자체 주기 유지.
+    input.tradeCurrency === "USD"
   );
   if (price === null) return hold;
 
