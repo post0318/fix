@@ -181,7 +181,7 @@ export default function Home() {
               rel="noopener noreferrer"
               className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
-              거시경제
+              🌐 거시경제
             </a>
             <button
               type="button"
