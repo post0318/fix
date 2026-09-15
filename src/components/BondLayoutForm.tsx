@@ -239,31 +239,40 @@ function getFrontFeeAmount(
   return Math.trunc(principal * (rate / 100));
 }
 
+// 일반 행 높이 = text-sm 줄높이 20px + py-2 16px + 상하 테두리 2px = 38px
+// (인쇄는 py-1 → 30px). tall 행은 정확히 두 행 높이로 고정해 옆 카드의 두 행
+// (거래통화+수탁통화)과 줄이 맞게 한다 — 두 행 자체는 손대지 않는다.
+const tallRowClass = "min-h-[76px] print:min-h-[60px]";
+
 function Row({
   label,
   children,
   editable = false,
   blank = false,
   strong = false,
+  tall = false,
 }: {
   label: ReactNode;
   children: ReactNode;
   editable?: boolean;
   blank?: boolean;
   strong?: boolean;
+  /** 두 행 높이(거래통화+수탁통화)로 고정 */
+  tall?: boolean;
 }) {
+  const extra = tall ? ` ${tallRowClass}` : "";
   return (
     <div className="grid grid-cols-2">
-      <div className={blank ? blankCellClass : labelCellClass}>{label}</div>
+      <div className={(blank ? blankCellClass : labelCellClass) + extra}>{label}</div>
       <div
         className={
-          blank
+          (blank
             ? blankCellClass
             : strong
               ? strongValueCellClass
               : editable
                 ? editableValueCellClass
-                : valueCellClass
+                : valueCellClass) + extra
         }
       >
         {children}
@@ -1104,7 +1113,7 @@ export function BondLayoutForm({
 
           {value.hasCall && (
             <>
-              <Row label="시나리오" editable>
+              <Row label="시나리오" editable tall>
                 <div className="flex flex-wrap gap-x-4 gap-y-1">
                   {CALL_SCENARIO_LABELS.map((opt) => (
                     <label
