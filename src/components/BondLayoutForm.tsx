@@ -252,7 +252,7 @@ function Row({
   blank = false,
   strong = false,
 }: {
-  label: string;
+  label: ReactNode;
   children: ReactNode;
   editable?: boolean;
   blank?: boolean;
@@ -1252,7 +1252,33 @@ export function BondLayoutForm({
               onKeyDown={commitOnEnter}
             />
           </Row>
-          <Row label="신탁만기일" editable>
+          <Row
+            // "자동" 배지/복원 버튼은 값 칸이 아니라 라벨 옆에 둔다 — 값 칸에
+            // 달력 입력과 나란히 두면 폭이 넘쳐 잘렸다(사용자 지적).
+            label={
+              <span className="flex items-center gap-2">
+                신탁만기일
+                {value.trustMaturityDate.trim() !== "" ? (
+                  <button
+                    type="button"
+                    onClick={() => update("trustMaturityDate", "")}
+                    title="수기값을 지우고 자동계산(상환일 + 리드타임)으로 되돌립니다"
+                    className="shrink-0 rounded border border-zinc-300 px-1.5 py-0.5 text-[11px] font-normal text-zinc-500 hover:bg-white dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 print:hidden"
+                  >
+                    자동
+                  </button>
+                ) : (
+                  <span
+                    title="자동계산: 상환일 + 리드타임(기본 11일)"
+                    className="shrink-0 text-[11px] font-normal italic text-zinc-400 dark:text-zinc-600 print:hidden"
+                  >
+                    자동
+                  </span>
+                )}
+              </span>
+            }
+            editable
+          >
             {(() => {
               // 신탁만기일 = 실효 상환일(만기 또는 콜/풋일) + 리드타임. 리드타임은
               // 기본 11일이고, 수기 override가 있으면 (override − 자산만기)
@@ -1274,60 +1300,42 @@ export function BondLayoutForm({
               );
               if (!isOverridden && displayed === "") return <ComputedValue />;
               return (
-                <div className="flex w-full flex-col gap-1">
-                  <div className="flex w-full items-center gap-2">
-                    <input
-                      className={inputClass}
-                      type="date"
-                      value={displayed}
-                      onChange={(e) => {
-                        const typed = clampDateYear(e.target.value);
-                        // 콜/풋 시나리오 중에 고치면 "상환일 대비 차이일"을 자산만기
-                        // 기준으로 환산해 저장한다 — 저장값은 항상 만기 기준 신탁만기일.
-                        if (
-                          effectiveRedemption.applied !== "hold" &&
-                          /^\d{4}-\d{2}-\d{2}$/.test(typed)
-                        ) {
-                          const gapDays = Math.round(
-                            (new Date(typed).getTime() -
-                              new Date(redemptionDate).getTime()) /
-                              86400000
-                          );
-                          const asset = new Date(value.maturityDate);
-                          if (!Number.isNaN(asset.getTime())) {
-                            asset.setUTCDate(asset.getUTCDate() + gapDays);
-                            update(
-                              "trustMaturityDate",
-                              asset.toISOString().slice(0, 10)
-                            );
-                            return;
-                          }
-                        }
-                        update("trustMaturityDate", typed);
-                      }}
-                      onKeyDown={commitOnEnter}
-                    />
-                    {isOverridden ? (
-                      <button
-                        type="button"
-                        onClick={() => update("trustMaturityDate", "")}
-                        className="shrink-0 rounded border border-zinc-300 px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-white dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 print:hidden"
-                      >
-                        자동
-                      </button>
-                    ) : (
-                      <span className="shrink-0 text-xs italic text-zinc-400 dark:text-zinc-600 print:hidden">
-                        자동
-                      </span>
-                    )}
-                  </div>
-                  {isEarlyRedemption && (
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400 print:hidden">
-                      수기 신탁만기일과 자산만기의 차이 {leadDays}일을 상환일에
-                      적용한 값입니다.
-                    </span>
-                  )}
-                </div>
+                <input
+                  className={inputClass}
+                  type="date"
+                  value={displayed}
+                  title={
+                    isEarlyRedemption
+                      ? `수기 신탁만기일과 자산만기의 차이 ${leadDays}일을 상환일에 적용한 값`
+                      : undefined
+                  }
+                  onChange={(e) => {
+                    const typed = clampDateYear(e.target.value);
+                    // 콜/풋 시나리오 중에 고치면 "상환일 대비 차이일"을 자산만기
+                    // 기준으로 환산해 저장한다 — 저장값은 항상 만기 기준 신탁만기일.
+                    if (
+                      effectiveRedemption.applied !== "hold" &&
+                      /^\d{4}-\d{2}-\d{2}$/.test(typed)
+                    ) {
+                      const gapDays = Math.round(
+                        (new Date(typed).getTime() -
+                          new Date(redemptionDate).getTime()) /
+                          86400000
+                      );
+                      const asset = new Date(value.maturityDate);
+                      if (!Number.isNaN(asset.getTime())) {
+                        asset.setUTCDate(asset.getUTCDate() + gapDays);
+                        update(
+                          "trustMaturityDate",
+                          asset.toISOString().slice(0, 10)
+                        );
+                        return;
+                      }
+                    }
+                    update("trustMaturityDate", typed);
+                  }}
+                  onKeyDown={commitOnEnter}
+                />
               );
             })()}
           </Row>
