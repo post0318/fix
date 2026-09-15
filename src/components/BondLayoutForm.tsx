@@ -790,7 +790,9 @@ export function BondLayoutForm({
                 <span className="flex items-center gap-1 text-sm text-zinc-900 dark:text-zinc-100">
                   <span className="shrink-0 text-zinc-500 dark:text-zinc-400">T+</span>
                   <input
-                    className={`${inputClass} w-8 shrink-0 print:hidden`}
+                    // inputClass의 w-full이 w-8보다 우선 적용돼 입력칸이 칸 전체를
+                    // 차지하고 뒤의 날짜가 밀려 안 보였다 → w-full을 빼고 고정폭.
+                    className={`${inputClass.replace("w-full ", "")} w-8 shrink-0 text-center print:hidden`}
                     type="text"
                     inputMode="numeric"
                     value={
