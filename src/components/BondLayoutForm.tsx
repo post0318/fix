@@ -1104,11 +1104,14 @@ export function BondLayoutForm({
           {value.hasCall && (
             <>
               <Row label="시나리오" editable tall>
-                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                {/* 세 옵션을 세로로 쌓되 줄높이를 줄여(leading-tight 17.5px×3
+                    = 52.5px) 두 행 높이 76px(내용 58px) 안에 들어가게 한다 —
+                    기본 줄높이 20px+gap이면 86px가 되어 옆 카드와 어긋났다. */}
+                <div className="flex flex-col leading-tight">
                   {CALL_SCENARIO_LABELS.map((opt) => (
                     <label
                       key={opt.value}
-                      className="flex items-center gap-1.5 text-sm text-zinc-900 dark:text-zinc-100"
+                      className="flex items-center gap-1.5 text-sm leading-tight text-zinc-900 dark:text-zinc-100"
                     >
                       <input
                         type="radio"
