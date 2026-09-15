@@ -29,7 +29,7 @@ import {
   getTrustMaturityLeadDays,
   toDateString,
 } from "@/lib/couponSchedule";
-import { resolveSettlementDays } from "@/lib/settlementCalendar";
+import { getDefaultSettlementDays, resolveSettlementDays } from "@/lib/settlementCalendar";
 import {
   computeBondPricing,
   getEffectiveRedemption,
@@ -320,6 +320,9 @@ export function BondLayoutForm({
   const [treasuryStatus, setTreasuryStatus] = useState<string | null>(null);
   // 콜조항 체크박스 재조회(검색 없이 켤 때) 상태 문구.
   const [callPutStatus, setCallPutStatus] = useState<string | null>(null);
+  // 결제일수 입력 중인 임시값. 엔터로만 확정되고, 엔터 없이 떠나면 버린다
+  // (사용자 지시: "엔터를 누르지 않으면 디폴트").
+  const [settlementDraft, setSettlementDraft] = useState<string | null>(null);
   // 비동기 응답(국채곡선 보간 등)이 돌아왔을 때 그 사이 입력이 바뀌었는지
   // 확인하기 위한 최신 value 스냅샷.
   const latestValue = useRef(value);
@@ -714,7 +717,8 @@ export function BondLayoutForm({
         </>
       )}
 
-      {/* 소득자구분 / 편입자산정보 공유 링크 */}
+      {/* 소득자구분 / 결제일 / 업로드·링크·정보잠금 — 3열 그리드라 아래 카드
+          (편입자산정보·매수내역·상품수익률)와 열이 맞는다. */}
       <div className="mb-4 print:mb-1 grid grid-cols-1 gap-4 md:grid-cols-3 print:hidden">
         <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
           <Row label="소득자구분" editable>
@@ -733,7 +737,94 @@ export function BondLayoutForm({
             </select>
           </Row>
         </div>
-        <div className="flex flex-wrap items-center gap-2 print:hidden md:col-span-2">
+        <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
+          <Row
+            // 결제일수는 달력이 아니라 숫자(T+n 영업일)로 입력한다 — 규칙상 T+1
+            // 이라도 상대방 숏커버 지연으로 결제가 늦어지는 일이 잦아 "5"처럼
+            // 실제 영업일수를 적는 편이 빠르다(사용자 지시). 비우면 시장 관행.
+            label={
+              <span className="flex items-center gap-2">
+                결제일
+                {value.settlementDays.trim() !== "" ? (
+                  <button
+                    type="button"
+                    onClick={() => update("settlementDays", "")}
+                    title="수기값을 지우고 시장 관행(미국 T+1·그 외 T+2)으로 되돌립니다"
+                    className="shrink-0 rounded border border-zinc-300 px-1.5 py-0.5 text-[11px] font-normal text-zinc-500 hover:bg-white dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 print:hidden"
+                  >
+                    자동
+                  </button>
+                ) : (
+                  <span
+                    title="시장 관행: 미국 T+1 · 그 외 T+2 (거래통화 시장 휴장일 반영)"
+                    className="shrink-0 text-[11px] font-normal italic text-zinc-400 dark:text-zinc-600 print:hidden"
+                  >
+                    자동
+                  </span>
+                )}
+              </span>
+            }
+            editable
+          >
+            {(() => {
+              const days = resolveSettlementDays(
+                value.settlementDays,
+                value.calcBasis,
+                value.tradeCurrency
+              );
+              const settlement = getSettlementDate(
+                value.trustContractDate,
+                value.calcBasis,
+                value.tradeCurrency,
+                value.settlementDays
+              );
+              return (
+                <span className="flex items-center gap-1 text-sm text-zinc-900 dark:text-zinc-100">
+                  <span className="shrink-0 text-zinc-500 dark:text-zinc-400">T+</span>
+                  <input
+                    className={`${inputClass} w-8 shrink-0 print:hidden`}
+                    type="text"
+                    inputMode="numeric"
+                    value={
+                      settlementDraft ??
+                      (value.settlementDays === "" ? String(days) : value.settlementDays)
+                    }
+                    onFocus={selectAllOnFocus}
+                    onChange={(e) => {
+                      if (/^\d{0,2}$/.test(e.target.value)) {
+                        setSettlementDraft(e.target.value);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") return;
+                      e.preventDefault();
+                      if (settlementDraft !== null) {
+                        // 시장 관행값과 같으면 빈 값(자동)으로 저장해 "자동" 배지를 유지한다.
+                        const defaultDays = String(
+                          getDefaultSettlementDays(value.calcBasis, value.tradeCurrency)
+                        );
+                        update(
+                          "settlementDays",
+                          settlementDraft === "" || settlementDraft === defaultDays
+                            ? ""
+                            : settlementDraft
+                        );
+                      }
+                      setSettlementDraft(null);
+                      e.currentTarget.blur();
+                    }}
+                    onBlur={() => setSettlementDraft(null)}
+                  />
+                  <span className="hidden print:inline">{days}</span>
+                  <span className="shrink-0">
+                    ({settlement ? toDateString(settlement) : "-"})
+                  </span>
+                </span>
+              );
+            })()}
+          </Row>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 print:hidden">
           <label className="inline-flex w-fit cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800">
             업로드
             <input
@@ -760,7 +851,7 @@ export function BondLayoutForm({
                 : "inline-flex w-fit items-center gap-1 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-white dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:disabled:hover:bg-zinc-900"
             }
           >
-            {locked ? "🔒 편입자산정보 잠김 (해제)" : "🔓 편입자산정보 잠금"}
+            {locked ? "🔒 정보잠김 (해제)" : "🔓 정보잠금"}
           </button>
           {(uploadStatus || linkStatus) && (
             <p className="ml-2 whitespace-nowrap text-xs text-zinc-500 dark:text-zinc-400">
@@ -1410,71 +1501,6 @@ export function BondLayoutForm({
               }
               onKeyDown={commitOnEnter}
             />
-          </Row>
-          <Row
-            // 결제일수는 달력이 아니라 숫자(T+n 영업일)로 입력한다 — 규칙상 T+1
-            // 이라도 상대방 숏커버 지연으로 결제가 늦어지는 일이 잦아 "5"처럼
-            // 실제 영업일수를 적는 편이 빠르다(사용자 지시). 비우면 시장 관행.
-            label={
-              <span className="flex items-center gap-2">
-                결제일
-                {value.settlementDays.trim() !== "" ? (
-                  <button
-                    type="button"
-                    onClick={() => update("settlementDays", "")}
-                    title="수기값을 지우고 시장 관행(미국 T+1·그 외 T+2)으로 되돌립니다"
-                    className="shrink-0 rounded border border-zinc-300 px-1.5 py-0.5 text-[11px] font-normal text-zinc-500 hover:bg-white dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 print:hidden"
-                  >
-                    자동
-                  </button>
-                ) : (
-                  <span
-                    title="시장 관행: 미국 T+1 · 그 외 T+2 (거래통화 시장 휴장일 반영)"
-                    className="shrink-0 text-[11px] font-normal italic text-zinc-400 dark:text-zinc-600 print:hidden"
-                  >
-                    자동
-                  </span>
-                )}
-              </span>
-            }
-            editable
-          >
-            {(() => {
-              const days = resolveSettlementDays(
-                value.settlementDays,
-                value.calcBasis,
-                value.tradeCurrency
-              );
-              const settlement = getSettlementDate(
-                value.trustContractDate,
-                value.calcBasis,
-                value.tradeCurrency,
-                value.settlementDays
-              );
-              return (
-                <span className="flex items-center gap-1 text-sm text-zinc-900 dark:text-zinc-100">
-                  <span className="shrink-0 text-zinc-500 dark:text-zinc-400">T+</span>
-                  <input
-                    className={`${inputClass} w-8 shrink-0 print:hidden`}
-                    type="text"
-                    inputMode="numeric"
-                    value={value.settlementDays === "" ? String(days) : value.settlementDays}
-                    onFocus={selectAllOnFocus}
-                    onChange={(e) => {
-                      if (/^\d{0,2}$/.test(e.target.value)) {
-                        update("settlementDays", e.target.value);
-                      }
-                    }}
-                    onKeyDown={commitOnEnter}
-                  />
-                  <span className="hidden print:inline">{days}</span>
-                  <span className="shrink-0 text-zinc-500 dark:text-zinc-400">영업일</span>
-                  <span className="ml-1 shrink-0">
-                    {settlement ? toDateString(settlement) : "-"}
-                  </span>
-                </span>
-              );
-            })()}
           </Row>
           <Row
             // "자동" 배지/복원 버튼은 값 칸이 아니라 라벨 옆에 둔다 — 값 칸에
