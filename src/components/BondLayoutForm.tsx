@@ -786,13 +786,15 @@ export function BondLayoutForm({
                 value.tradeCurrency,
                 value.settlementDays
               );
+              // "T+n (YYYY-MM-DD)"가 좁은 값 칸(툴바 2열의 절반) 안에 다 들어가야
+              // 한다: 간격 0, 숫자칸 20px, 날짜는 text-xs. 셀 자체는 손대지 않는다.
               return (
-                <span className="flex items-center gap-1 text-sm text-zinc-900 dark:text-zinc-100">
+                <span className="flex min-w-0 items-center gap-0 text-sm text-zinc-900 dark:text-zinc-100">
                   <span className="shrink-0 text-zinc-500 dark:text-zinc-400">T+</span>
                   <input
-                    // inputClass의 w-full이 w-8보다 우선 적용돼 입력칸이 칸 전체를
+                    // inputClass의 w-full이 고정폭보다 우선 적용돼 입력칸이 칸 전체를
                     // 차지하고 뒤의 날짜가 밀려 안 보였다 → w-full을 빼고 고정폭.
-                    className={`${inputClass.replace("w-full ", "")} w-8 shrink-0 text-center print:hidden`}
+                    className={`${inputClass.replace("w-full ", "")} w-5 shrink-0 px-0 text-center print:hidden`}
                     type="text"
                     inputMode="numeric"
                     value={
@@ -826,7 +828,7 @@ export function BondLayoutForm({
                     onBlur={() => setSettlementDraft(null)}
                   />
                   <span className="hidden print:inline">{days}</span>
-                  <span className="shrink-0">
+                  <span className="ml-1 shrink-0 text-xs">
                     ({settlement ? toDateString(settlement) : "-"})
                   </span>
                 </span>
