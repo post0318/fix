@@ -68,10 +68,7 @@ interface BondTranche {
   parCallMonthsBeforeMaturity: number | null;
   makeWholeSpreadBps: number | null;
   redemptionText: string | null;
-  putDate: string | null;
-  putText: string | null;
   callAbsentConfirmed: boolean;
-  putAbsentConfirmed: boolean;
 }
 
 interface FwpDetail {
@@ -151,10 +148,9 @@ interface UsBondSearchBoxProps {
     fields: Partial<BondLayoutInput>,
     meta?: {
       disclosureRating?: boolean;
-      /** 콜/풋 조건이 공시서류 자동추출값(추정)인지 — 폼에서 "추정" 표시용 */
+      /** 콜조항이 공시서류 자동추출값(추정)인지 — 폼에서 "추정" 표시용 */
       callTermsAuto?: boolean;
       redemptionText?: string | null;
-      putText?: string | null;
     }
   ) => void;
 }
@@ -300,10 +296,7 @@ export function UsBondSearchBox({ disabled, active, onApply }: UsBondSearchBoxPr
         parCallMonthsBeforeMaturity: null,
         makeWholeSpreadBps: null,
         redemptionText: null,
-        putDate: null,
-        putText: null,
         callAbsentConfirmed: false,
-        putAbsentConfirmed: false,
       };
       applyTranche(tranche, TREASURY_COMPANY.name, "USD", true);
       fetch("/api/country-rating?slug=united-states")
@@ -384,21 +377,14 @@ export function UsBondSearchBox({ disabled, active, onApply }: UsBondSearchBoxPr
     fields.makeWholeRedemptionDate = "";
     fields.makeWholeRefYield = "";
 
-    // 풋옵션: 콜과 같은 패턴이지만, 대부분의 채권은 풋이 없는 게 정상이라
-    // (부재가 이례적인 콜과 반대) missing 목록에는 넣지 않는다.
-    const parsedHasPut = !isTreasury && tranche.putDate !== null;
-    fields.hasPut = parsedHasPut;
-    fields.putDate = !isTreasury && tranche.putDate ? tranche.putDate : "";
-
-    // 검색으로 들어온 진짜 SEC ISIN만 저장한다 — 콜/풋 체크박스 재조회의
+    // 검색으로 들어온 진짜 SEC ISIN만 저장한다 — 콜조항 체크박스 재조회의
     // 조회 키로 쓰인다(국채 CUSIP은 SEC 채권 조회에 쓸 수 없어 제외).
     fields.isin = !isTreasury && tranche.isin ? tranche.isin : "";
 
     onApply(fields, {
       disclosureRating: !isTreasury && !!tranche.rating,
-      callTermsAuto: parsedHasCall || parsedHasPut,
+      callTermsAuto: parsedHasCall,
       redemptionText: tranche.redemptionText,
-      putText: tranche.putText,
     });
     setRatingLink(isTreasury ? null : FINRA_FIXED_INCOME_URL);
     setRatingCusip(!isTreasury && tranche.isin ? cusipFromIsin(tranche.isin) : null);

@@ -16,13 +16,11 @@ const CALL_SCENARIO_TO_CODE: Record<CallScenario, number> = {
   hold: 0,
   parCall: 1,
   makeWhole: 2,
-  put: 3,
 };
 const CALL_SCENARIO_BY_CODE: Record<number, CallScenario> = {
   0: "hold",
   1: "parCall",
   2: "makeWhole",
-  3: "put",
 };
 
 const COUPON_FREQUENCY_TO_CODE: Record<CouponFrequency, number> = {
@@ -168,8 +166,6 @@ function pack(value: BondLayoutInput): string {
     stripDateDashes(value.makeWholeRedemptionDate),
     value.makeWholeRefYield,
     value.isin,
-    value.hasPut ? "1" : "",
-    stripDateDashes(value.putDate),
   ];
   return fields.map((f) => (f ?? "").replace(/\|/g, " ")).join("|");
 }
@@ -207,8 +203,6 @@ function unpack(text: string): Partial<BondLayoutInput> | null {
     makeWholeRedemptionDate,
     makeWholeRefYield,
     isin,
-    hasPut,
-    putDate,
   ] = parts;
 
   const result: Partial<BondLayoutInput> = {};
@@ -229,8 +223,6 @@ function unpack(text: string): Partial<BondLayoutInput> | null {
     result.makeWholeRedemptionDate = restoreDateDashes(makeWholeRedemptionDate);
   if (makeWholeRefYield) result.makeWholeRefYield = makeWholeRefYield;
   if (isin) result.isin = isin;
-  if (hasPut === "1") result.hasPut = true;
-  if (putDate) result.putDate = restoreDateDashes(putDate);
   if (callScenarioCode) {
     const scenario = CALL_SCENARIO_BY_CODE[Number(callScenarioCode)];
     if (scenario) result.callScenario = scenario;

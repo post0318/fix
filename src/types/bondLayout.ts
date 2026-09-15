@@ -15,14 +15,14 @@ export type Currency = "USD" | "EUR" | "CNY" | "JPY" | "KRW" | "BRL";
 export type TaxStatus = "일반과세" | "비과세(농특세)" | "비과세";
 
 /**
- * 콜/풋/조기상환 시나리오.
+ * 콜/조기상환 시나리오.
  * - hold: 만기보유 (기본, 현행 동작)
  * - parCall: par call일에 액면(100%) 조기상환 (발행사 콜)
  * - makeWhole: 지정일에 make-whole 상환가(잔여현금흐름을 국채금리+스프레드로
  *   할인한 값과 액면 중 큰 값)로 조기상환 (발행사 콜)
- * - put: 풋옵션 행사일에 액면(100%) 조기상환 (투자자 콜, 조기상환청구권)
+ * (풋옵션은 일반 채권이 아니라는 판단으로 제외 — 2026-09-15)
  */
-export type CallScenario = "hold" | "parCall" | "makeWhole" | "put";
+export type CallScenario = "hold" | "parCall" | "makeWhole";
 
 export interface BondLayoutInput {
   calcBasis: CalcBasis;
@@ -66,11 +66,7 @@ export interface BondLayoutInput {
 
   /**
    * SEC 조회용 ISIN. 미국채권검색으로 종목을 반영한 경우만 채워진다 —
-   * 콜/풋 체크박스 재조회(검색 없이 체크만 켜는 경우)의 조회 키로 쓰인다.
+   * 콜조항 체크박스 재조회(검색 없이 체크만 켜는 경우)의 조회 키로 쓰인다.
    */
   isin: string;
-  /** 풋옵션(투자자 조기상환청구권) 존재 여부. */
-  hasPut: boolean;
-  /** 풋옵션 행사일(YYYY-MM-DD). 상환가는 액면(100%) 고정 가정. */
-  putDate: string;
 }

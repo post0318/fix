@@ -91,8 +91,6 @@ function clearedCallFields(
     cleared.makeWholeRedemptionDate = "";
   if (incoming.makeWholeRefYield === undefined) cleared.makeWholeRefYield = "";
   if (incoming.isin === undefined) cleared.isin = "";
-  if (incoming.hasPut === undefined) cleared.hasPut = false;
-  if (incoming.putDate === undefined) cleared.putDate = "";
   return cleared;
 }
 
@@ -217,15 +215,11 @@ const CALL_SCENARIO_LABELS: { value: CallScenario; label: string }[] = [
   { value: "hold", label: "만기보유" },
   { value: "parCall", label: "Par Call 행사" },
   { value: "makeWhole", label: "Make-Whole 상환" },
-  { value: "put", label: "풋옵션 행사" },
 ];
 
 /** 공시서류 자동추출(추정) 안내문 — 원문 발췌를 함께 보여준다. */
-function autoTermsNoteText(
-  redemptionText?: string | null,
-  putText?: string | null
-): string {
-  const excerpt = [redemptionText, putText].filter(Boolean).join(" / ");
+function autoTermsNoteText(redemptionText?: string | null): string {
+  const excerpt = redemptionText ?? "";
   return excerpt
     ? `공시서류 자동추출값(추정) — 원문 확인 필요. 발췌: "${excerpt.slice(0, 200)}${
         excerpt.length > 200 ? "…" : ""
@@ -323,12 +317,12 @@ export function BondLayoutForm({
   // 출처(국채/한국/브라질/종목검색/수기입력/업로드)로 바뀌면 false로
   // 되돌린다.
   const [disclosureRating, setDisclosureRating] = useState(false);
-  // 콜/풋 조건이 공시서류 자동추출값(추정)일 때 화면에 띄울 안내(원문 발췌 포함).
+  // 콜조항이 공시서류 자동추출값(추정)일 때 화면에 띄울 안내(원문 발췌 포함).
   // 사용자가 직접 고치거나 종목이 바뀌면 지운다(Opus #10).
   const [autoTermsNote, setAutoTermsNote] = useState<string | null>(null);
   const [treasuryCurve, setTreasuryCurve] = useState<YieldCurve | null>(null);
   const [treasuryStatus, setTreasuryStatus] = useState<string | null>(null);
-  // 콜/풋 체크박스 재조회(검색 없이 켤 때, 또는 "다시 확인") 상태 문구.
+  // 콜조항 체크박스 재조회(검색 없이 켤 때) 상태 문구.
   const [callPutStatus, setCallPutStatus] = useState<string | null>(null);
   // 비동기 응답(국채곡선 보간 등)이 돌아왔을 때 그 사이 입력이 바뀌었는지
   // 확인하기 위한 최신 value 스냅샷.
@@ -390,8 +384,6 @@ export function BondLayoutForm({
         calcBasis: value.calcBasis,
         tradeCurrency: value.tradeCurrency,
         trustContractDate: value.trustContractDate,
-        hasPut: value.hasPut,
-        putDate: value.putDate,
       }),
     [
       value.hasCall,
@@ -406,8 +398,6 @@ export function BondLayoutForm({
       value.calcBasis,
       value.tradeCurrency,
       value.trustContractDate,
-      value.hasPut,
-      value.putDate,
     ]
   );
 
@@ -436,8 +426,6 @@ export function BondLayoutForm({
         makeWholeRedemptionDate: value.makeWholeRedemptionDate,
         makeWholeRefYield: value.makeWholeRefYield,
         makeWholeSpreadBps: value.makeWholeSpreadBps,
-        hasPut: value.hasPut,
-        putDate: value.putDate,
       }),
     [
       value.maturityDate,
@@ -462,8 +450,6 @@ export function BondLayoutForm({
       value.makeWholeRedemptionDate,
       value.makeWholeRefYield,
       value.makeWholeSpreadBps,
-      value.hasPut,
-      value.putDate,
     ]
   );
 
@@ -548,14 +534,11 @@ export function BondLayoutForm({
     onChange((prev) => ({ ...prev, makeWholeRefYield: refYield }));
   };
 
-  // 콜/풋 체크박스 재조회: 검색을 거치지 않고 체크박스를 켤 때(또는 "다시
-  // 확인" 클릭 시) 이미 반영된 ISIN으로 공시서류를 다시 조회한다. next를
-  // 받아 한 번의 onChange로 반영해 동시 입력을 덮어쓰지 않는다.
-  const verifyCallPutTerms = async (
-    next: BondLayoutInput,
-    kind: "call" | "put"
-  ) => {
-    const label = kind === "call" ? "콜조항" : "풋옵션";
+  // 콜조항 체크박스 재조회: 검색을 거치지 않고 체크박스를 켤 때 이미 반영된
+  // ISIN으로 공시서류를 다시 조회한다. next를 받아 한 번의 onChange로 반영해
+  // 동시 입력을 덮어쓰지 않는다.
+  const verifyCallTerms = async (next: BondLayoutInput) => {
+    const label = "콜조항";
     if (!next.isin) {
       setCallPutStatus(
         `자동확인 불가 — ISIN 정보가 없어 ${label}을(를) 직접 입력해 주세요.`
@@ -572,19 +555,15 @@ export function BondLayoutForm({
         tranche?: {
           parCallDate: string | null;
           makeWholeSpreadBps: number | null;
-          putDate: string | null;
           callAbsentConfirmed?: boolean;
-          putAbsentConfirmed?: boolean;
           redemptionText?: string | null;
-          putText?: string | null;
         };
       };
       // 응답이 오는 동안 종목이 바뀌었거나(ISIN 불일치) 사용자가 체크를
       // 이미 껐으면 이 결과는 폐기한다 — stale closure로 되살리거나 다른
       // 입력을 덮어쓰지 않도록(감사 F5).
       const now = latestValue.current;
-      const stillOn = kind === "call" ? now.hasCall : now.hasPut;
-      if (now.isin !== next.isin || !stillOn) return;
+      if (now.isin !== next.isin || !now.hasCall) return;
 
       if (!res.ok || !data.found || !data.tranche) {
         setCallPutStatus(
@@ -593,54 +572,34 @@ export function BondLayoutForm({
         return;
       }
       const t = data.tranche;
-      if (kind === "call") {
-        const found = t.parCallDate !== null || t.makeWholeSpreadBps !== null;
-        if (found) {
-          onChange((prev) => ({
-            ...prev,
-            parCallDate: t.parCallDate ?? prev.parCallDate,
-            makeWholeSpreadBps:
-              t.makeWholeSpreadBps != null
-                ? String(t.makeWholeSpreadBps)
-                : prev.makeWholeSpreadBps,
-          }));
-          setCallPutStatus("공시서류에서 콜조항을 확인해 반영했습니다.");
-          setAutoTermsNote(autoTermsNoteText(t.redemptionText, null));
-        } else if (t.callAbsentConfirmed) {
-          // 문서가 "콜 없음"을 명시한 경우에만 경고 + 체크 해제.
-          onChange((prev) => ({
-            ...prev,
-            hasCall: false,
-            callScenario:
-              prev.callScenario === "parCall" || prev.callScenario === "makeWhole"
-                ? "hold"
-                : prev.callScenario,
-          }));
-          setCallPutStatus("공시서류를 확인했으나 콜조항이 없는 것으로 확인됩니다.");
-        } else {
-          // 문서는 찾았지만 조항을 못 읽음(서식 미지원 등) — "없음"으로 단정하지 않는다.
-          setCallPutStatus(
-            "공시서류는 찾았으나 콜조항을 자동으로 읽지 못했습니다. 원문을 확인해 직접 입력해 주세요."
-          );
-        }
+      const found = t.parCallDate !== null || t.makeWholeSpreadBps !== null;
+      if (found) {
+        onChange((prev) => ({
+          ...prev,
+          parCallDate: t.parCallDate ?? prev.parCallDate,
+          makeWholeSpreadBps:
+            t.makeWholeSpreadBps != null
+              ? String(t.makeWholeSpreadBps)
+              : prev.makeWholeSpreadBps,
+        }));
+        setCallPutStatus("공시서류에서 콜조항을 확인해 반영했습니다.");
+        setAutoTermsNote(autoTermsNoteText(t.redemptionText));
+      } else if (t.callAbsentConfirmed) {
+        // 문서가 "콜 없음"을 명시한 경우에만 경고 + 체크 해제.
+        onChange((prev) => ({
+          ...prev,
+          hasCall: false,
+          callScenario:
+            prev.callScenario === "parCall" || prev.callScenario === "makeWhole"
+              ? "hold"
+              : prev.callScenario,
+        }));
+        setCallPutStatus("공시서류를 확인했으나 콜조항이 없는 것으로 확인됩니다.");
       } else {
-        if (t.putDate !== null) {
-          const putDate = t.putDate;
-          onChange((prev) => ({ ...prev, putDate }));
-          setCallPutStatus("공시서류에서 풋옵션을 확인해 반영했습니다.");
-          setAutoTermsNote(autoTermsNoteText(null, t.putText));
-        } else if (t.putAbsentConfirmed) {
-          onChange((prev) => ({
-            ...prev,
-            hasPut: false,
-            callScenario: prev.callScenario === "put" ? "hold" : prev.callScenario,
-          }));
-          setCallPutStatus("공시서류를 확인했으나 풋옵션이 없는 것으로 확인됩니다.");
-        } else {
-          setCallPutStatus(
-            "공시서류는 찾았으나 풋옵션을 자동으로 읽지 못했습니다. 원문을 확인해 직접 입력해 주세요."
-          );
-        }
+        // 문서는 찾았지만 조항을 못 읽음(서식 미지원 등) — "없음"으로 단정하지 않는다.
+        setCallPutStatus(
+          "공시서류는 찾았으나 콜조항을 자동으로 읽지 못했습니다. 원문을 확인해 직접 입력해 주세요."
+        );
       }
     } catch {
       setCallPutStatus(
@@ -722,7 +681,7 @@ export function BondLayoutForm({
             if (meta?.callTermsAuto !== undefined) {
               setAutoTermsNote(
                 meta.callTermsAuto
-                  ? autoTermsNoteText(meta.redemptionText, meta.putText)
+                  ? autoTermsNoteText(meta.redemptionText)
                   : null
               );
             }
@@ -840,7 +799,7 @@ export function BondLayoutForm({
               value={value.maturityDate}
               disabled={locked}
               onChange={(e) => {
-                // 만기일을 수기로 바꾸면 이전 종목의 콜/풋/ISIN·신탁만기일 override는
+                // 만기일을 수기로 바꾸면 이전 종목의 콜/ISIN·신탁만기일 override는
                 // 무의미하므로 검색/업로드 경로와 동일하게 초기화한다(감사 F7).
                 setAutoTermsNote(null);
                 onChange({
@@ -1280,9 +1239,9 @@ export function BondLayoutForm({
             editable
           >
             {(() => {
-              // 신탁만기일 = 실효 상환일(만기 또는 콜/풋일) + 리드타임. 리드타임은
+              // 신탁만기일 = 실효 상환일(만기 또는 콜일) + 리드타임. 리드타임은
               // 기본 11일이고, 수기 override가 있으면 (override − 자산만기)
-              // 차이일이 되어 콜/풋 상환일에도 그대로 적용된다.
+              // 차이일이 되어 콜 상환일에도 그대로 적용된다.
               const redemptionDate =
                 effectiveRedemption.redemptionDate || value.maturityDate;
               const displayed =
@@ -1311,7 +1270,7 @@ export function BondLayoutForm({
                   }
                   onChange={(e) => {
                     const typed = clampDateYear(e.target.value);
-                    // 콜/풋 시나리오 중에 고치면 "상환일 대비 차이일"을 자산만기
+                    // 콜 시나리오 중에 고치면 "상환일 대비 차이일"을 자산만기
                     // 기준으로 환산해 저장한다 — 저장값은 항상 만기 기준 신탁만기일.
                     if (
                       effectiveRedemption.applied !== "hold" &&
@@ -1478,7 +1437,7 @@ export function BondLayoutForm({
           </Row>
         </GroupCard>
 
-        <GroupCard title="콜 / 풋 옵션">
+        <GroupCard title="콜 / 조기상환">
           <Row label="콜조항" editable>
             <label className="flex items-center gap-2 text-sm text-zinc-900 dark:text-zinc-100">
               <input
@@ -1498,7 +1457,7 @@ export function BondLayoutForm({
                         : value.callScenario,
                   };
                   onChange(next);
-                  if (checked) void verifyCallPutTerms(next, "call");
+                  if (checked) void verifyCallTerms(next);
                 }}
               />
               <span>{value.hasCall ? "있음" : "없음"}</span>
@@ -1548,46 +1507,7 @@ export function BondLayoutForm({
             </>
           )}
 
-          <Row label="풋옵션" editable>
-            <label className="flex items-center gap-2 text-sm text-zinc-900 dark:text-zinc-100">
-              <input
-                type="checkbox"
-                className="h-4 w-4 accent-orange-600"
-                checked={value.hasPut}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  const next = {
-                    ...value,
-                    hasPut: checked,
-                    callScenario:
-                      !checked && value.callScenario === "put"
-                        ? ("hold" as CallScenario)
-                        : value.callScenario,
-                  };
-                  onChange(next);
-                  if (checked) void verifyCallPutTerms(next, "put");
-                }}
-              />
-              <span>{value.hasPut ? "있음" : "없음"}</span>
-            </label>
-          </Row>
-
-          {value.hasPut && (
-            <Row label="풋옵션 행사일" editable>
-              <input
-                className={inputClass}
-                type="date"
-                value={value.putDate}
-                onChange={(e) => {
-                  setAutoTermsNote(null);
-                  update("putDate", clampDateYear(e.target.value));
-                }}
-                onKeyDown={commitOnEnter}
-              />
-            </Row>
-          )}
-
-          {autoTermsNote && (value.hasCall || value.hasPut) && (
+          {autoTermsNote && value.hasCall && (
             <Row label="">
               <span className="text-xs text-amber-700 dark:text-amber-400 print:hidden">
                 <span className="mr-1 rounded border border-amber-400 px-1 text-[10px] font-semibold">
@@ -1606,17 +1526,11 @@ export function BondLayoutForm({
             </Row>
           )}
 
-          {(value.hasCall || value.hasPut) && (
+          {value.hasCall && (
             <>
               <Row label="시나리오" editable>
                 <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  {CALL_SCENARIO_LABELS.filter(
-                    (opt) =>
-                      opt.value === "hold" ||
-                      ((opt.value === "parCall" || opt.value === "makeWhole") &&
-                        value.hasCall) ||
-                      (opt.value === "put" && value.hasPut)
-                  ).map((opt) => (
+                  {CALL_SCENARIO_LABELS.map((opt) => (
                     <label
                       key={opt.value}
                       className="flex items-center gap-1.5 text-sm text-zinc-900 dark:text-zinc-100"

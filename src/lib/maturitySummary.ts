@@ -11,7 +11,7 @@ export interface MaturitySummaryInputs {
   trustContractDate: string;
   maturityDate: string;
   /**
-   * 콜/풋 시나리오의 실효 원금상환일. 있으면 투자일수(수익률 연환산 분모)가
+   * 콜 시나리오의 실효 원금상환일. 있으면 투자일수(수익률 연환산 분모)가
    * 만기일 대신 이 값 기준으로 산출된다(현금흐름표도 이 날짜에 끝나야 일관).
    */
   redemptionDate?: string;
@@ -51,7 +51,7 @@ export interface MaturitySummary {
  * - 세전금액의 후취보수는 투자일수 전체분(투자금 × 율 ÷ 365 × 투자일수).
  * - 세후금액은 현금흐름표 세후수령액에 회차별 후취보수가 이미 차감돼 있어,
  *   어느 행에도 없는 마지막 리드타임(기본 11일)분만 추가로 뺀다.
- * - 콜/풋 시나리오: 원금 합계(make-whole 프리미엄 포함)와 투자일수(상환일
+ * - 콜 시나리오: 원금 합계(make-whole 프리미엄 포함)와 투자일수(상환일
  *   기준)가 행 데이터·리드타임에서 자연히 따라온다 — 별도 보정 없음.
  */
 export function computeMaturitySummary(
