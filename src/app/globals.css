@@ -50,3 +50,31 @@ body {
     display: none;
   }
 }
+
+/* ── 현금흐름표 열람 제한 ── CashFlowGuard 가 <body> 에 .cf-guard 를 붙였을 때만 적용.
+   인쇄·PDF 저장은 본문을 모두 숨기고 안내문만 남긴다. */
+.cf-print-notice {
+  display: none;
+}
+@media print {
+  body.cf-guard * {
+    visibility: hidden !important;
+  }
+  body.cf-guard .cf-print-notice,
+  body.cf-guard .cf-print-notice * {
+    visibility: visible !important;
+  }
+  body.cf-guard .cf-print-notice {
+    display: flex !important;
+    position: fixed;
+    inset: 0;
+    align-items: center;
+    justify-content: center;
+    padding: 20mm;
+    background: #fff;
+    color: #000;
+    font-size: 15pt;
+    font-weight: 700;
+    text-align: center;
+  }
+}

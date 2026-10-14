@@ -1,4 +1,8 @@
+"use client";
+
 import { CashFlowRow } from "@/lib/cashFlowSchedule";
+import { useAppAuth } from "@/components/auth/AppAuth";
+import { CashFlowGuard, cashFlowWatermarkStyle } from "@/components/CashFlowGuard";
 
 interface CashFlowTableProps {
   rows: CashFlowRow[] | null;
@@ -27,6 +31,8 @@ export function CashFlowTable({
   custodyCurrency,
   scenarioNote,
 }: CashFlowTableProps) {
+  // 승인 계정으로 로그인하면 워터마크·인쇄/복사 차단이 풀린다(4번 프로젝트와 같은 규칙).
+  const restricted = useAppAuth().allowed !== true;
   const data = rows ?? [];
   const isKrw = custodyCurrency === "KRW";
   const hasSpecialTax = data.some((row) => row.specialTax !== null);
@@ -110,7 +116,21 @@ export function CashFlowTable({
   );
 
   return (
-    <section className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950 sm:p-6 print:p-2">
+    <section
+      data-cf-table
+      className={`relative rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950 sm:p-6 print:p-2 ${restricted ? "select-none" : ""}`}
+    >
+      {restricted && (
+        <>
+          <CashFlowGuard />
+          {/* 워터마크: 표 위에 깔고 클릭은 통과시킨다 */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 z-10 rounded-2xl"
+            style={cashFlowWatermarkStyle(new Date().toLocaleDateString("sv-SE"))}
+          />
+        </>
+      )}
       <h2 className="mb-5 print:mb-1 text-base font-semibold text-zinc-900 dark:text-zinc-100">
         현금흐름표
       </h2>
