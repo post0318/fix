@@ -282,9 +282,9 @@ export function BondSearchBox({
           if (countrySlug === "united-states" || countrySlug === "brazil") return "OK";
           if (calcBasisConfirmed && frequencyConfirmed) return "OK";
           if (frequencyConfirmed) {
-            return "날짜계산기준은 기본값(미국 30/360)입니다. 실제 종목과 다를 수 있어 직접 확인이 필요합니다.";
+            return "날짜계산기준: 기본값(미국 30/360), 확인 필요";
           }
-          return "날짜계산기준/이자지급주기는 기본값(미국 30/360·6개월)입니다. 실제 종목과 다를 수 있어 직접 확인이 필요합니다.";
+          return "날짜계산기준·이자지급주기: 기본값(미국 30/360·6개월), 확인 필요";
         };
         setStatus(computeStatus(false, realFrequency !== null));
         setOpen(false);
