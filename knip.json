@@ -1,0 +1,3 @@
+{
+  "ignore": ["src/lib/offline/clerk-stub.tsx"]
+}
