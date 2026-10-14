@@ -8,6 +8,7 @@ import {
   Currency,
   TaxStatus,
 } from "@/types/bondLayout";
+import { staleNote } from "@/lib/staleNote";
 
 interface CompanyInfo {
   cik: string;
@@ -199,8 +200,11 @@ export function UsBondSearchBox({
         if (!res.ok) throw new Error("failed");
         return res.json();
       })
-      .then((data: { companies?: CompanyInfo[] }) => {
-        if (!cancelled) setCompanies(Array.isArray(data.companies) ? data.companies : []);
+      .then((data: { companies?: CompanyInfo[]; staleSince?: string | null }) => {
+        if (cancelled) return;
+        setCompanies(Array.isArray(data.companies) ? data.companies : []);
+        const note = staleNote(data.staleSince);
+        if (note) setStatus(`회사 목록: ${note}`);
       })
       .catch(() => {
         if (!cancelled) setCompaniesError("온라인(Vercel) 배포판에서만 미국채권검색을 사용할 수 있습니다.");
@@ -255,8 +259,12 @@ export function UsBondSearchBox({
 
     if (company.cik === TREASURY_COMPANY.cik) {
       fetch("/api/us-treasury-list")
-        .then((res) => res.json())
-        .then((data: { bonds?: TreasuryBondItem[] }) => {
+        .then((res) => {
+          // 서버 오류(502)면 빈 목록이 아니라 실패 안내를 띄운다
+          if (!res.ok) throw new Error("failed");
+          return res.json();
+        })
+        .then((data: { bonds?: TreasuryBondItem[]; staleSince?: string | null }) => {
           const all = Array.isArray(data.bonds) ? data.bonds : [];
           const items: TreasuryListItem[] = all
             .filter((b) => b.maturityDate >= today)
@@ -269,6 +277,8 @@ export function UsBondSearchBox({
               data: b,
             }));
           setBonds(items);
+          const note = staleNote(data.staleSince);
+          if (note) setStatus(`국채 목록: ${note}`);
         })
         .catch(() => setStatus("국채 목록을 불러오지 못했습니다."))
         .finally(() => setLoadingBonds(false));
@@ -276,13 +286,19 @@ export function UsBondSearchBox({
     }
 
     fetch(`/api/us-bond-list?cik=${company.cik}`)
-      .then((res) => res.json())
-      .then((data: { bonds?: Omit<SecListItem, "kind">[] }) => {
+      .then((res) => {
+        // 서버 오류(502)면 빈 목록이 아니라 실패 안내를 띄운다
+        if (!res.ok) throw new Error("failed");
+        return res.json();
+      })
+      .then((data: { bonds?: Omit<SecListItem, "kind">[]; staleSince?: string | null }) => {
         const all = Array.isArray(data.bonds) ? data.bonds : [];
         const items: SecListItem[] = all
           .filter((b) => !b.maturityDate || b.maturityDate >= today)
           .map((b) => ({ kind: "sec", ...b }));
         setBonds(items);
+        const note = staleNote(data.staleSince);
+        if (note) setStatus(`채권 목록: ${note}`);
       })
       .catch(() => setStatus("채권 목록을 불러오지 못했습니다."))
       .finally(() => setLoadingBonds(false));

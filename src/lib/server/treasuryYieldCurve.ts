@@ -9,7 +9,8 @@ const USER_AGENT =
 // 지연)에는 RETRY_MS 동안 재조회를 참아 요청이 몰리지 않게 한다.
 const RETRY_MS = 30 * 60 * 1000;
 const REDIS_KEY = "us-treasury-yield-curve-v1";
-const REDIS_TTL_SECONDS = 24 * 60 * 60;
+// 신선도는 날짜로 판단하고, Redis 는 원본 실패 때 쓸 묵은 곡선 보관용이라 30일(2026-10-14, 예전 24시간)
+const REDIS_TTL_SECONDS = 30 * 24 * 60 * 60;
 /** 재무부 일별 곡선 발표 시각(미 동부 15:30~16:00) 이후로 보는 기준 시(ET). */
 const PUBLISH_HOUR_ET = 17;
 
