@@ -317,7 +317,7 @@ export function BondLayoutForm({
   // 업로드 직후 보관함 목록을 다시 불러오게 하는 신호
   const [bondsRefresh, setBondsRefresh] = useState(0);
   const [activeSearchBox, setActiveSearchBox] = useState<
-    "general" | "us" | "kr" | null
+    "general" | "us" | "kr" | "upload" | null
   >(null);
   // 신용등급이 SEC 공시서류(FWP) 기준 값인지(미국채권검색의 회사채만
   // 해당) 표시해 라벨을 "신용등급(공시기준)"으로 바꾸는 데 쓴다. 다른
@@ -707,15 +707,6 @@ export function BondLayoutForm({
             onChange((prev) => applyFieldsWithCurrencySync(prev, fields));
           }}
         />
-        <UploadedBondsBox
-          refreshKey={bondsRefresh}
-          disabled={lockToggleDisabled}
-          onApply={(fields) => {
-            setActiveSearchBox(null);
-            setCallNotice(null);
-            applyUploaded(fields);
-          }}
-        />
         <KoreaBondSearchBox
           disabled={lockToggleDisabled}
           active={activeSearchBox === "kr"}
@@ -726,6 +717,16 @@ export function BondLayoutForm({
             setDisclosureRating(false);
             setAutoTermsNote(null);
             onChange((prev) => applyFieldsWithCurrencySync(prev, fields));
+          }}
+        />
+        <UploadedBondsBox
+          refreshKey={bondsRefresh}
+          disabled={lockToggleDisabled}
+          active={activeSearchBox === "upload"}
+          onApply={(fields) => {
+            setActiveSearchBox("upload");
+            setCallNotice(null);
+            applyUploaded(fields);
           }}
         />
       </div>
