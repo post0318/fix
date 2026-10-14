@@ -31,7 +31,7 @@ export function CashFlowTable({
   custodyCurrency,
   scenarioNote,
 }: CashFlowTableProps) {
-  // 승인 계정으로 로그인하면 워터마크·인쇄/복사 차단이 풀린다(4번 프로젝트와 같은 규칙).
+  // 승인 계정으로 로그인하면 워터마크·인쇄/복사 차단이 풀린다(brazil 프로젝트와 같은 규칙).
   const restricted = useAppAuth().allowed !== true;
   const data = rows ?? [];
   const isKrw = custodyCurrency === "KRW";
