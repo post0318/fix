@@ -651,8 +651,10 @@ export function BondLayoutForm({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ fields: parsed }),
         });
-        if (res.ok) setBondsRefresh((n) => n + 1);
-        else {
+        if (res.ok) {
+          setBondsRefresh((n) => n + 1);
+          saveNote = " 업로드 채권 목록에 저장했습니다.";
+        } else {
           const data = (await res.json().catch(() => ({}))) as { error?: string };
           saveNote = ` (보관함 저장 실패: ${data.error ?? res.status})`;
         }
