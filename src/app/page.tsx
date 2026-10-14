@@ -210,7 +210,7 @@ export default function Home() {
         <header className="mb-8 flex items-start justify-between gap-4 print:hidden">
           <div>
             <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
-              채권세상
+              글로벌 채권정보
             </h1>
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
               채권정보만 입력하면 현금흐름을 보여주는 서비스

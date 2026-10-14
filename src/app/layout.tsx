@@ -6,7 +6,7 @@ import { allowedEmailDomains, resolveAuthState } from "@/lib/server/appAuth";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "채권세상",
+  title: "글로벌 채권정보",
   description: "채권정보만 입력하면 현금흐름을 보여주는 서비스",
   robots: {
     index: false,
