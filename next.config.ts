@@ -18,7 +18,18 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = isStaticExport
-  ? { output: "export", assetPrefix: "." }
+  ? {
+      output: "export",
+      assetPrefix: ".",
+      // 정적 export 는 서버 액션을 지원하지 않는데 Clerk 에 들어 있다 → 대체 모듈로 바꿔 끼운다.
+      turbopack: {
+        resolveAlias: {
+          "@clerk/nextjs": "./src/lib/offline/clerk-stub.tsx",
+          "@clerk/nextjs/server": "./src/lib/offline/clerk-stub.tsx",
+          "@clerk/localizations": "./src/lib/offline/clerk-stub.tsx",
+        },
+      },
+    }
   : {
       poweredByHeader: false,
       async headers() {
