@@ -216,7 +216,7 @@ export default function Home() {
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {/* 5번 프로젝트(매크로 인사이트)의 거시경제 화면. 새 탭으로 연다. 앞의 "M" 배지는
+            {/* 5번 프로젝트(매크로 인사이트)의 글로벌 핵심지표 화면. 새 탭으로 연다. 앞의 "M" 배지는
                 5번 헤더 로고와 같은 모양(어두운 둥근 사각형)이라 어디로 가는 링크인지 바로 알 수 있다. */}
             <a
               href="https://macro-insights.duckdns.org/macro?embed=top"
@@ -230,7 +230,7 @@ export default function Home() {
               >
                 M
               </span>
-              거시경제
+              핵심지표
               <svg
                 viewBox="0 0 12 12"
                 width="10"
