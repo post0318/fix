@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BondLayoutInput, CalcBasis, CouponFrequency, Currency, TaxStatus } from "@/types/bondLayout";
 import { COUNTRY_ISSUER_ALIASES, COUNTRY_ISSUER_SLUGS } from "@/lib/countryIssuerAliases";
+import { staleNote } from "@/lib/staleNote";
 
 interface BondSearchItem {
   isin: string;
@@ -104,8 +105,11 @@ export function BondSearchBox({
         if (!res.ok) throw new Error("failed");
         return res.json();
       })
-      .then((data: { issuers?: string[] }) => {
-        if (!cancelled) setIssuers(Array.isArray(data.issuers) ? data.issuers : []);
+      .then((data: { issuers?: string[]; staleSince?: string | null }) => {
+        if (cancelled) return;
+        setIssuers(Array.isArray(data.issuers) ? data.issuers : []);
+        const note = staleNote(data.staleSince);
+        if (note) setStatus(`발행사 목록: ${note}`);
       })
       .catch(() => {
         if (!cancelled) {

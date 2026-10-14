@@ -224,10 +224,27 @@ async function searchGetRequest(
 }
 
 /** bond_search_criteria_data의 발행자(issuer) 전체 목록 (약 4,600여개) */
-export async function getIssuers(): Promise<string[]> {
+// 발행사 목록(4,500여 개)은 거의 바뀌지 않는다 — 예전엔 캐시가 없어 열 때마다 6~10초(2026-10-14)
+const REDIS_ISSUERS_KEY = "bf-issuers-v1";
+const REDIS_ISSUERS_TTL_SECONDS = 24 * 60 * 60;
+
+export async function getIssuers(forceRefresh = false): Promise<string[]> {
+  const redis = getRedis();
+  if (redis && !forceRefresh) {
+    try {
+      const hit = await redis.get<string[]>(REDIS_ISSUERS_KEY);
+      if (hit && hit.length > 0) return hit;
+    } catch {
+      // Redis 조회 실패는 무시하고 원본 소스로 폴백한다.
+    }
+  }
   const data = await searchGetRequest("bond_search_criteria_data", { lang: "de" });
-  const issuers = data?.issuers;
-  return Array.isArray(issuers) ? (issuers as string[]) : [];
+  const raw = data?.issuers;
+  const issuers = Array.isArray(raw) ? (raw as string[]) : [];
+  if (redis && issuers.length > 0) {
+    redis.set(REDIS_ISSUERS_KEY, issuers, { ex: REDIS_ISSUERS_TTL_SECONDS }).catch(() => {});
+  }
+  return issuers;
 }
 
 export interface BondSearchItem {
