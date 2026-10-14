@@ -15,6 +15,8 @@ const securityHeaders = [
   { key: "Referrer-Policy", value: "no-referrer" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+  // 검색엔진 제외 — 페이지 메타(noindex)가 붙지 않는 API 응답·파일까지 헤더로 알린다.
+  { key: "X-Robots-Tag", value: "noindex, nofollow" },
 ];
 
 const nextConfig: NextConfig = isStaticExport
