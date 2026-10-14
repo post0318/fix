@@ -22,7 +22,7 @@ export default async function AdminPage() {
           href="/"
           className="text-sm text-zinc-600 hover:underline dark:text-zinc-400"
         >
-          ← 채권세상
+          ← 글로벌 채권정보
         </Link>
       </header>
 
