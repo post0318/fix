@@ -9,7 +9,7 @@
 
 - Next.js 16 (app router), Tailwind CSS
 - Upstash Redis (외부 원본 캐시 `withLastGood`, 업로드 채권 보관)
-- Clerk (로그인·가입 대기자 승인) — 4번 프로젝트와 같은 Clerk 앱의 키를 쓴다
+- Clerk (로그인·가입 대기자 승인) — brazil 프로젝트와 같은 Clerk 앱의 키를 쓴다
 - Vercel 배포. `main`에 병합되면 운영이 다시 뜬다
 
 ## 코드규칙

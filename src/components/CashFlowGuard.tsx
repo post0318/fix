@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 
 /**
- * 현금흐름표 열람 제한 — 4번 프로젝트의 ClientViewGuard 와 같은 방식(오너 지시).
+ * 현금흐름표 열람 제한 — brazil 프로젝트의 ClientViewGuard 와 같은 방식(오너 지시).
  *  - 인쇄 차단: `@media print` 에서 본문을 숨기고 안내문만 (globals.css 의
  *    `body.cf-guard` 규칙)
  *  - 현금흐름표 안에서만 우클릭·복사·잘라내기·드래그 차단 + 텍스트 선택 불가
