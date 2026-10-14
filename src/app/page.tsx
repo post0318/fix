@@ -216,14 +216,36 @@ export default function Home() {
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {/* 프로젝트 5(글로벌 리서치)의 거시경제 화면. 새 탭으로 연다. */}
+            {/* 5번 프로젝트(매크로 인사이트)의 거시경제 화면. 새 탭으로 연다. 앞의 "M" 배지는
+                5번 헤더 로고와 같은 모양(어두운 둥근 사각형)이라 어디로 가는 링크인지 바로 알 수 있다. */}
             <a
               href="https://macro-insights.duckdns.org/macro?embed=top"
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="group inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white py-1 pl-1.5 pr-3 text-sm font-medium text-zinc-700 transition-colors hover:border-zinc-400 hover:bg-zinc-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:bg-zinc-800"
             >
-              🌐 거시경제
+              <span
+                aria-hidden="true"
+                className="grid size-5 place-items-center rounded bg-zinc-900 text-[11px] font-bold leading-none text-white dark:bg-zinc-100 dark:text-zinc-900"
+              >
+                M
+              </span>
+              거시경제
+              <svg
+                viewBox="0 0 12 12"
+                width="10"
+                height="10"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className="-ml-0.5 text-zinc-400 transition-transform group-hover:-translate-y-px group-hover:translate-x-px dark:text-zinc-500"
+              >
+                <path d="M3.5 8.5l5-5M4.5 3.5h4v4" />
+              </svg>
+              <span className="sr-only">(새 탭에서 열림)</span>
             </a>
             {/* 출력은 승인 계정으로 로그인했을 때만(오너 지시) */}
             {auth.allowed === true && (
