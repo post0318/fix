@@ -179,7 +179,22 @@ export async function getFwpFilings(cik: string): Promise<FilingSummary[]> {
   return getFilings(cik, "FWP", 30);
 }
 
+/**
+ * SEC 공시 보관소(https://www.sec.gov/Archives/edgar/data/...) 주소인지. 요청에서 받은
+ * indexUrl 을 그대로 가져오던 탓에, 아무 주소나 넣으면 서버가 대신 요청했다(SSRF,
+ * 2026-10-14 보안 점검에서 example.com 으로 확인) — 서버가 가져오는 주소는 여기만 허용한다.
+ */
+export function isSecArchiveUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && u.hostname === "www.sec.gov" && u.pathname.startsWith("/Archives/edgar/data/");
+  } catch {
+    return false;
+  }
+}
+
 async function getPrimaryDocUrl(indexUrl: string): Promise<string | null> {
+  if (!isSecArchiveUrl(indexUrl)) throw new Error("SEC 공시 주소가 아닙니다.");
   const html = await fetchText(indexUrl);
   const matches = [...html.matchAll(/href="([^"]+\.htm)"/g)].map((mm) => mm[1]);
   const candidate = matches.find(
@@ -189,7 +204,8 @@ async function getPrimaryDocUrl(indexUrl: string): Promise<string | null> {
       !href.endsWith("-index.htm")
   );
   if (!candidate) return null;
-  return candidate.startsWith("http") ? candidate : `https://www.sec.gov${candidate}`;
+  const docUrl = candidate.startsWith("http") ? candidate : `https://www.sec.gov${candidate}`;
+  return isSecArchiveUrl(docUrl) ? docUrl : null;
 }
 
 function htmlToText(html: string): string {
@@ -1175,7 +1191,7 @@ async function findFwpByIsinFullText(
   isin: string
 ): Promise<{ indexUrl: string; filedDate: string; cik: string } | null> {
   try {
-    const url = `https://efts.sec.gov/LATEST/search-index?q=%22${isin}%22&forms=FWP`;
+    const url = `https://efts.sec.gov/LATEST/search-index?q=${encodeURIComponent(`"${isin}"`)}&forms=FWP`;
     const json = await fetchText(url);
     const data = JSON.parse(json) as {
       hits?: {

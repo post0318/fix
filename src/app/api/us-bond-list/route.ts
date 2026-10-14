@@ -7,6 +7,9 @@ export async function GET(request: NextRequest) {
   if (!cik) {
     return NextResponse.json({ error: "cik 파라미터가 필요합니다." }, { status: 400 });
   }
+  if (!/^\d{1,10}$/.test(cik)) {
+    return NextResponse.json({ error: "cik 형식이 올바르지 않습니다." }, { status: 400 });
+  }
   try {
     // 원본 실패 시 마지막 정상값(staleSince = 저장 시각)
     const { value: bonds, staleSince } = await withLastGood(
