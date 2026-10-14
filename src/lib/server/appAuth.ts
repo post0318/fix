@@ -2,7 +2,7 @@ import "server-only";
 import { auth, currentUser } from "@clerk/nextjs/server";
 
 /**
- * 출력·업로드 허용 판정과 계정 승인 관리의 서버 측 잠금(4번 프로젝트와 같은 방식).
+ * 출력·업로드 허용 판정과 계정 승인 관리의 서버 측 잠금(brazil 프로젝트와 같은 방식).
  * Clerk 세션이 있고, 그 계정의 이메일이 허용 도메인
  * (`ALLOWED_EMAIL_DOMAINS`, 기본 hanwha.com)에 속하거나 관리자 목록
  * (`ADMIN_EMAILS`)에 있어야 통과한다.

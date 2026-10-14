@@ -7,7 +7,7 @@ import type { NextConfig } from "next";
  */
 const isStaticExport = process.env.STATIC_EXPORT === "1";
 
-// 보안 헤더(2026-10-14 보안 점검, 4번 프로젝트와 같은 값). 다른 사이트가 iframe 으로
+// 보안 헤더(2026-10-14 보안 점검, brazil 프로젝트와 같은 값). 다른 사이트가 iframe 으로
 // 끼워 넣지 못하게, 외부 링크로 나갈 때 주소가 전달되지 않게, MIME 스니핑 차단.
 const securityHeaders = [
   { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
