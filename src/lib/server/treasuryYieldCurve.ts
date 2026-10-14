@@ -16,7 +16,7 @@ const PUBLISH_HOUR_ET = 17;
 
 // 타입·보간은 클라이언트와 공유하는 순수 모듈(@/lib/yieldCurve)에 있다.
 import type { TreasuryParYieldCurve, YieldCurvePoint } from "@/lib/yieldCurve";
-export type { TreasuryParYieldCurve, YieldCurvePoint } from "@/lib/yieldCurve";
+export type { TreasuryParYieldCurve } from "@/lib/yieldCurve";
 
 // XML의 <d:BC_*> 필드 → 만기(연). BC_30YEARDISPLAY 등 표시용 필드는 제외.
 const TENOR_YEARS: Record<string, number> = {
@@ -57,7 +57,7 @@ function easternParts(now: Date): { y: number; m: number; d: number; h: number }
  * 동부시간 PUBLISH_HOUR_ET 이후면 오늘, 아니면 어제부터 거슬러 올라가 미국
  * 채권시장 영업일(주말·SIFMA 휴장일 제외)을 찾는다.
  */
-export function latestPublishedCurveDate(now: Date = new Date()): string {
+function latestPublishedCurveDate(now: Date = new Date()): string {
   const et = easternParts(now);
   const d = new Date(Date.UTC(et.y, et.m - 1, et.d));
   if (et.h < PUBLISH_HOUR_ET) d.setUTCDate(d.getUTCDate() - 1);
@@ -66,7 +66,7 @@ export function latestPublishedCurveDate(now: Date = new Date()): string {
 }
 
 /** 캐시된 곡선이 아직 최신인가 — 곡선 날짜가 발표됐어야 할 날짜 이상이면 최신. */
-export function isCurveFresh(curve: TreasuryParYieldCurve, now: Date = new Date()): boolean {
+function isCurveFresh(curve: TreasuryParYieldCurve, now: Date = new Date()): boolean {
   return curve.date >= latestPublishedCurveDate(now);
 }
 

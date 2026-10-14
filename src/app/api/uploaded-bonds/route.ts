@@ -8,6 +8,8 @@ import {
 import { isAdminEmail, requireTradingUser } from "@/lib/server/appAuth";
 import type { BondLayoutInput } from "@/types/bondLayout";
 
+const MAX_FIELDS = 40;
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -17,12 +19,16 @@ export const dynamic = "force-dynamic";
  */
 export async function GET() {
   try {
-    return NextResponse.json({ bonds: await listUploadedBonds() });
+    // 올린 사람의 이메일은 공개하지 않는다. 로그인한 승인 계정에게만 "지울 수 있는지"를 알려 준다.
+    const who = await requireTradingUser();
+    const bonds = (await listUploadedBonds()).map(({ uploadedBy, ...pub }) => ({
+      ...pub,
+      canDelete: who.ok && (uploadedBy === who.email || isAdminEmail(who.email)),
+    }));
+    return NextResponse.json({ bonds });
   } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "조회 실패" },
-      { status: 502 }
-    );
+    console.error("[uploaded-bonds] 조회 실패", e);
+    return NextResponse.json({ error: "조회하지 못했습니다." }, { status: 502 });
   }
 }
 
@@ -31,6 +37,8 @@ function sanitizeFields(raw: unknown): Partial<BondLayoutInput> | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const out: Record<string, string | boolean> = {};
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    // 업로드 파서가 만드는 필드 이름(영문 camelCase)만, 개수·길이를 제한해 받는다.
+    if (!/^[A-Za-z]{1,40}$/.test(k) || Object.keys(out).length >= MAX_FIELDS) continue;
     if (typeof v === "string") out[k] = v.slice(0, 500);
     else if (typeof v === "boolean") out[k] = v;
   }

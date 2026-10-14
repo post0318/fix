@@ -102,7 +102,7 @@ function normalizeCompanyName(name: string): string {
  * 많다(실제 확인: Apple/Meta/Microsoft/Alphabet). 구두점을 제거하고 정확히
  * 일치할 때만 매칭해, 서로 다른 회사가 우연히 이어붙는 오매칭을 막는다.
  */
-export async function findCompanyByName(name: string): Promise<CompanyInfo | null> {
+async function findCompanyByName(name: string): Promise<CompanyInfo | null> {
   const target = normalizeCompanyName(name);
   if (!target) return null;
   const companies = await getCompanies();
@@ -121,7 +121,7 @@ export async function findCikByName(name: string): Promise<string | null> {
   return company?.cik ?? null;
 }
 
-export interface FilingSummary {
+interface FilingSummary {
   accessionNumber: string;
   filedDate: string;
   indexUrl: string;
@@ -175,7 +175,7 @@ async function getFilings(
 }
 
 /** 최근 채권 발행 시 제출되는 가격결정 조건표(FWP) 목록 */
-export async function getFwpFilings(cik: string): Promise<FilingSummary[]> {
+async function getFwpFilings(cik: string): Promise<FilingSummary[]> {
   return getFilings(cik, "FWP", 30);
 }
 
@@ -359,7 +359,7 @@ export interface BondTranche {
   callAbsentConfirmed: boolean;
 }
 
-export interface RedemptionTerms {
+interface RedemptionTerms {
   parCallDate: string | null;
   parCallMonthsBeforeMaturity: number | null;
   makeWholeSpreadBps: number | null;
@@ -373,7 +373,7 @@ const EMPTY_REDEMPTION: RedemptionTerms = {
   redemptionText: null,
 };
 
-export interface AbsenceFlags {
+interface AbsenceFlags {
   callAbsentConfirmed: boolean;
 }
 
@@ -803,7 +803,7 @@ function parseTrancheBlock(block: string): Omit<BondTranche, "label"> {
  * 1) 여러 트랜치가 각자 완결된 블록(Issuer:...Ratings:...CUSIP/ISIN:)으로 반복되는 서식
  * 2) 한 번의 공통 섹션(Ratings/Trade Date 등)에 트랜치별 값만 나열식으로 이어지는 서식
  */
-export function parseFwp(html: string): FwpParseResult {
+function parseFwp(html: string): FwpParseResult {
   const text = htmlToText(html).replace(/\s+/g, " ");
   // "$"/"USD"는 문서 어딘가(법률 상투구 등)에 우연히 섞여 나올 수 있어
   // 배제 조건으로 못 쓴다. 대신 실제 통화기호(¥/€/£)나 명칭이 하나라도
@@ -1020,29 +1020,6 @@ export async function fetchFwpDetail(
 }
 
 /**
- * 같은 회사가 FWP와 비슷한 시점에 낸 424B(본 증권신고서 보충)에서 "Optional
- * Redemption" 조항을 찾는다. findDayCountBasis와 동일한 구조 — 424B5는 보통
- * FWP 1~2일 뒤 제출되므로 ±5일로 잡는다.
- */
-export async function findRedemptionTerms(
-  cik: string,
-  fwpFiledDate: string,
-  maturityDate?: string | null
-): Promise<RedemptionTerms | null> {
-  const text = await find424BText(cik, fwpFiledDate);
-  if (!text) return null;
-  const terms = extractRedemptionTerms(text, maturityDate ?? null);
-  if (
-    terms.makeWholeSpreadBps === null &&
-    terms.parCallDate === null &&
-    terms.parCallMonthsBeforeMaturity === null
-  ) {
-    return null;
-  }
-  return terms;
-}
-
-/**
  * FWP와 비슷한 시점(±5일)에 같은 회사가 낸 424B 본문을 정규화 텍스트로 돌려준다.
  * fetchFwpDetail의 콜 폴백이 트랜치별로 스코핑·캡을 걸 수 있도록 파싱 전
  * 원문을 그대로 넘긴다.
@@ -1248,7 +1225,7 @@ export async function findCallTermsByIsin(
 }
 
 /** 같은 회사가 FWP와 비슷한 시점에 낸 424B(본 증권신고서)에서 day-count 관용구를 찾는다 */
-export async function findDayCountBasis(
+async function findDayCountBasis(
   cik: string,
   fwpFiledDate: string
 ): Promise<string | null> {

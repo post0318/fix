@@ -32,7 +32,7 @@ function adminEmails(): string[] {
     .filter(Boolean);
 }
 
-export function isAllowedEmail(email: string): boolean {
+function isAllowedEmail(email: string): boolean {
   const e = email.trim().toLowerCase();
   if (adminEmails().includes(e)) return true;
   const at = e.lastIndexOf("@");

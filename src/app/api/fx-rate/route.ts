@@ -10,6 +10,9 @@ export async function GET(request: NextRequest) {
       { status: 400 }
     );
   }
+  if (!/^[A-Za-z]{3}$/.test(base) || !/^[A-Za-z]{3}$/.test(quote)) {
+    return NextResponse.json({ error: "통화 코드는 영문 3자입니다." }, { status: 400 });
+  }
   try {
     const rate = await fetchFxRate(base, quote);
     return NextResponse.json({ rate });

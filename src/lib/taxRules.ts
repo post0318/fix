@@ -5,19 +5,9 @@ import { TaxStatus } from "@/types/bondLayout";
 // 절사한다 — 15.4%를 한 번에 곱해 절사하면 회차마다 1센트/10원씩 정본보다
 // 크게 나온다(Fable 감사 F10). 한국전력 7.95% 2096 채권만 구세법(소득세 0% +
 // 농특세)으로 "비과세(농특세)"로 분류돼 이 함수는 0을 돌려준다.
-export const INCOME_TAX_RATE = 0.14;
+const INCOME_TAX_RATE = 0.14;
 /** 주민세(지방소득세) = 소득세의 10% */
-export const LOCAL_TAX_RATE_ON_INCOME_TAX = 0.1;
-
-/**
- * 합산 명목세율(15.4% 또는 0). 은행환산수익률 기본값 등 "비율" 용도로만 쓰고,
- * 실제 세액 계산은 computeWithholdingTax(두 단계 절사)를 쓴다.
- */
-export function getEffectiveIncomeTaxRate(taxStatus: TaxStatus): number {
-  return taxStatus === "일반과세"
-    ? INCOME_TAX_RATE * (1 + LOCAL_TAX_RATE_ON_INCOME_TAX)
-    : 0;
-}
+const LOCAL_TAX_RATE_ON_INCOME_TAX = 0.1;
 
 export interface WithholdingTax {
   /** 소득세 = 절사(과세표준 × 14%) */

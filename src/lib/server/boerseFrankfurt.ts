@@ -327,7 +327,7 @@ function frequencyFromFirstPayGap(
   return null;
 }
 
-export interface BondQuote {
+interface BondQuote {
   bidYield: number | null;
   askYield: number | null;
   lastPriceYield: number | null;
@@ -435,7 +435,7 @@ function frequencyFromMonths(m: number | null | undefined): CouponFrequency {
  * 오차가 있는 추정치다. 결과가 −5%~+50% 밖이면(단위표시 호가·파싱 오류 등)
  * null. bidYield/askYield는 대응 데이터가 없어 항상 null이다.
  */
-export async function getBondQuote(
+async function getBondQuote(
   isin: string,
   mic: string,
   couponRate: number | null,

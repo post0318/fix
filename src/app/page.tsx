@@ -107,9 +107,8 @@ export default function Home() {
     }
   }, []);
   const [input, setInput] = useState<BondLayoutInput>(createInitialInput);
-  const [locked, setLocked] = useState<boolean>(createInitialLocked);
-  // 공유 링크로 열린 세션인지 여부(최초 1회 계산 후 고정). locked는 토글 가능하지만
-  // 이 값은 바뀌지 않아, 공유 링크로 열었을 때는 잠금 버튼을 계속 비활성화해둔다.
+  // 옛 공유 링크(?bond=)로 열린 세션인지 여부(최초 1회 계산 후 고정). 이 경우 입력은
+  // 읽기 전용(locked)이고 검색도 막는다. 링크를 새로 만드는 기능은 없앴다.
   const [isSharedLink] = useState<boolean>(createInitialLocked);
 
   // 직전 입력 복원/저장. 공유 링크로 연 세션은 링크 내용이 우선이라 건드리지 않는다.
@@ -283,8 +282,7 @@ export default function Home() {
           <BondLayoutForm
             value={input}
             onChange={setInput}
-            locked={locked}
-            onLockedChange={setLocked}
+            locked={isSharedLink}
             lockToggleDisabled={isSharedLink}
           />
           <CashFlowTable

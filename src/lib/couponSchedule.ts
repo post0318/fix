@@ -44,7 +44,7 @@ export function addMonths(date: Date, months: number): Date {
   return target;
 }
 
-export function addDays(date: Date, days: number): Date {
+function addDays(date: Date, days: number): Date {
   const result = new Date(date);
   result.setUTCDate(result.getUTCDate() + days);
   return result;
@@ -180,36 +180,4 @@ export function getRecentCouponDate(
   return toDateString(
     getCouponPeriod(maturity, frequency, referenceDate).previousCouponDate
   );
-}
-
-/** 이자계산일 목록. 신탁만기일(=만기일+11일)과 이자지급주기에 따라 행 수가 자동으로 변동한다. */
-export function generateCouponSchedule(
-  issueDate: string,
-  maturityDate: string,
-  frequency: CouponFrequency
-): string[] {
-  const issue = new Date(issueDate);
-  const maturity = new Date(maturityDate);
-  if (
-    Number.isNaN(issue.getTime()) ||
-    Number.isNaN(maturity.getTime()) ||
-    maturity <= issue
-  ) {
-    return [];
-  }
-
-  const months = FREQUENCY_MONTHS[frequency];
-  // 이표일은 만기일 기준으로 months×k 개월씩 뺀 날(월말성 유지). 발행일 이후
-  // ~ 만기일 이전 구간만. 마지막 행은 신탁만기일(만기+11일).
-  const coupons: Date[] = [];
-  for (let k = 1; ; k++) {
-    const d = addMonths(maturity, -months * k);
-    if (d <= issue) break;
-    coupons.unshift(d);
-  }
-
-  const dates = coupons.map(toDateString);
-  dates.push(toDateString(addDays(maturity, TRUST_MATURITY_LEAD_DAYS)));
-
-  return dates;
 }

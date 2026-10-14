@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getIssuers, getSalt } from "@/lib/server/boerseFrankfurt";
 import { withLastGood } from "@/lib/server/redis";
@@ -18,12 +19,12 @@ export const maxDuration = 60;
  * 위해 그대로 둔다. CRON_SECRET 검증은 브라질 캐시 워밍과 동일하게 적용한다.
  */
 export async function GET(request: NextRequest) {
+  // 시크릿이 없으면 열어 두지 않고 거부한다(환경변수 누락 시 아무나 외부 호출을 일으키지 못하게).
   const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  const want = Buffer.from(`Bearer ${secret ?? ""}`);
+  const got = Buffer.from(request.headers.get("authorization") ?? "");
+  if (!secret || got.length !== want.length || !timingSafeEqual(got, want)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const nonEmpty = (v: unknown[]) => v.length > 0;

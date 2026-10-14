@@ -30,9 +30,14 @@ export async function listUploadedBonds(): Promise<UploadedBond[]> {
   let all: UploadedBond[];
   if (redis) {
     const raw = await redis.hgetall<Record<string, UploadedBond | string>>(HASH_KEY);
-    all = Object.values(raw ?? {}).map((v) =>
-      typeof v === "string" ? (JSON.parse(v) as UploadedBond) : v
-    );
+    // 깨진 항목 하나가 목록 전체를 막지 않게 읽을 수 없는 건 건너뛴다.
+    all = Object.values(raw ?? {}).flatMap((v) => {
+      try {
+        return [typeof v === "string" ? (JSON.parse(v) as UploadedBond) : v];
+      } catch {
+        return [];
+      }
+    });
   } else {
     all = [...memory.values()];
   }
@@ -43,8 +48,9 @@ export async function saveUploadedBond(
   fields: Partial<BondLayoutInput>,
   uploadedBy: string
 ): Promise<UploadedBond | { error: string }> {
-  const existing = await listUploadedBonds();
-  if (existing.length >= MAX_BONDS) return { error: "보관 가능한 채권 수를 넘었습니다." };
+  const redis = getRedis();
+  const count = redis ? await redis.hlen(HASH_KEY) : memory.size;
+  if (count >= MAX_BONDS) return { error: "보관 가능한 채권 수를 넘었습니다." };
   const bond: UploadedBond = {
     id: randomUUID(),
     name: (fields.name ?? "").trim() || "(이름 없음)",
@@ -54,14 +60,17 @@ export async function saveUploadedBond(
     uploadedBy,
     fields,
   };
-  const redis = getRedis();
   if (redis) await redis.hset(HASH_KEY, { [bond.id]: JSON.stringify(bond) });
   else memory.set(bond.id, bond);
   return bond;
 }
 
 export async function getUploadedBond(id: string): Promise<UploadedBond | null> {
-  return (await listUploadedBonds()).find((b) => b.id === id) ?? null;
+  const redis = getRedis();
+  if (!redis) return memory.get(id) ?? null;
+  const raw = await redis.hget<UploadedBond | string>(HASH_KEY, id);
+  if (!raw) return null;
+  return typeof raw === "string" ? (JSON.parse(raw) as UploadedBond) : raw;
 }
 
 export async function deleteUploadedBond(id: string): Promise<void> {

@@ -147,7 +147,6 @@ interface BondLayoutFormProps {
   value: BondLayoutInput;
   onChange: Dispatch<SetStateAction<BondLayoutInput>>;
   locked: boolean;
-  onLockedChange: (locked: boolean) => void;
   lockToggleDisabled?: boolean;
 }
 
@@ -310,7 +309,6 @@ export function BondLayoutForm({
   value,
   onChange,
   locked,
-  onLockedChange,
   lockToggleDisabled = false,
 }: BondLayoutFormProps) {
   // 업로드는 승인 계정으로 로그인했을 때만 보인다(오너 지시).
@@ -673,12 +671,8 @@ export function BondLayoutForm({
         <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
           입력 레이아웃
         </h2>
-        {/* 업로드로 걸린 잠금(locked)에서는 검색창을 계속 쓸 수 있어야 다른
-            종목을 검색해 새로 반영할 수 있다(검색으로 새 종목을 반영하면
-            onLockedChange(false)로 잠금을 풀고, 다시 업로드하면
-            handleUpload에서 다시 잠근다). 반면 공유 링크로 연 화면
-            (lockToggleDisabled=isSharedLink)은 배포된 값을 그대로 봐야
-            하므로 검색 자체를 막는다. */}
+        {/* 옛 공유 링크로 연 화면(lockToggleDisabled=isSharedLink)은 배포된 값을
+            그대로 봐야 하므로 검색 자체를 막는다. */}
         <BondSearchBox
           disabled={lockToggleDisabled}
           active={activeSearchBox === "general"}
@@ -686,7 +680,6 @@ export function BondLayoutForm({
           onApply={(fields) => {
             setActiveSearchBox("general");
             setCallNotice(null);
-            onLockedChange(false);
             setDisclosureRating(false);
             setAutoTermsNote(null);
             onChange((prev) => applyFieldsWithCurrencySync(prev, fields));
@@ -699,7 +692,6 @@ export function BondLayoutForm({
           onApply={(fields, meta) => {
             setActiveSearchBox("us");
             setCallNotice(null);
-            onLockedChange(false);
             if (meta?.disclosureRating !== undefined) {
               setDisclosureRating(meta.disclosureRating);
             }
@@ -729,7 +721,6 @@ export function BondLayoutForm({
           onApply={(fields) => {
             setActiveSearchBox("kr");
             setCallNotice(null);
-            onLockedChange(false);
             setDisclosureRating(false);
             setAutoTermsNote(null);
             onChange((prev) => applyFieldsWithCurrencySync(prev, fields));
@@ -748,7 +739,7 @@ export function BondLayoutForm({
         </>
       )}
 
-      {/* 소득자구분 / 결제일 / 업로드·링크·정보잠금 — 3열 그리드라 아래 카드
+      {/* 소득자구분 / 결제일 / 업로드 — 3열 그리드라 아래 카드
           (편입자산정보·매수내역·상품수익률)와 열이 맞는다. */}
       <div className="mb-4 print:mb-1 grid grid-cols-1 gap-4 md:grid-cols-3 print:hidden">
         <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
