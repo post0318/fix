@@ -18,6 +18,7 @@ type UploadableField =
   | "taxStatus"
   | "calcBasis"
   | "creditRating"
+  | "isin"
   | "frontFeeRate"
   | "backFeeRate"
   | "tradeCurrency"
@@ -36,6 +37,8 @@ const LABEL_TO_FIELD: Record<string, UploadableField> = {
   "날짜계산 기준": "calcBasis",
   신용등급: "creditRating",
   해외신용등급: "creditRating",
+  ISIN: "isin",
+  isin: "isin",
   선취보수율: "frontFeeRate",
   "선취보수율(%)": "frontFeeRate",
   후취보수율: "backFeeRate",
@@ -117,6 +120,26 @@ function toIsoDate(value: unknown): string | null {
   return null;
 }
 
+/** ISIN 형식(국가 2자 + 영숫자 9자 + 숫자 1자)과 체크 숫자(Luhn)를 확인한다. 틀린 값은 읽지 않는다. */
+function isValidIsin(isin: string): boolean {
+  if (!/^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(isin)) return false;
+  const digits = [...isin.slice(0, 11)]
+    .map((ch) => (/[A-Z]/.test(ch) ? String(ch.charCodeAt(0) - 55) : ch))
+    .join("");
+  let sum = 0;
+  let double = true;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let d = Number(digits[i]);
+    if (double) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    sum += d;
+    double = !double;
+  }
+  return (10 - (sum % 10)) % 10 === Number(isin[11]);
+}
+
 /**
  * 업로드된 엑셀에서 라벨 텍스트를 찾아 바로 오른쪽 셀 값을 대응 필드로 매핑한다.
  * top_lay.xlsx(라벨/값이 인접 컬럼에 배치된 구조)와 동일한 방식의 파일이면 시트 레이아웃과 무관하게 인식된다.
@@ -146,7 +169,13 @@ export function parseBondFile(buffer: ArrayBuffer): Partial<BondLayoutInput> {
         if (!valueCell || valueCell.v === undefined || valueCell.v === "")
           continue;
 
-        if (field === "name" || field === "creditRating") {
+        if (field === "isin") {
+          const isin = String(valueCell.v).trim().toUpperCase();
+          if (isValidIsin(isin)) {
+            result.isin = isin;
+            found.add(field);
+          }
+        } else if (field === "name" || field === "creditRating") {
           result[field] = String(valueCell.v);
           found.add(field);
         } else if (
