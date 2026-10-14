@@ -28,7 +28,8 @@ const FINRA_FIXED_INCOME_URL = "https://www.finra.org/finra-data/fixed-income";
 /**
  * FINRA 채권 상세 화면으로 바로 여는 주소. 주소에 CUSIP 을 넣으면 그 채권이 바로 조회된다
  * (bondType=CA: 회사채·기관채, 2026-10-14 오너 확인). 예전엔 검색 첫 화면만 열고 CUSIP 을
- * 복사해 두어 직접 붙여 넣어야 했다. CUSIP 이 이상하면 검색 첫 화면.
+ * 복사해 두어 직접 붙여 넣어야 했다 — 이제 필요 없어 복사와 "(CUSIP … 복사됨)" 문구는 뺐다
+ * (오너 지시 2026-10-14). CUSIP 이 이상하면 검색 첫 화면.
  */
 function finraBondUrl(cusip: string | null): string {
   return cusip && /^[0-9A-Z]{9}$/.test(cusip)
@@ -199,8 +200,6 @@ export function UsBondSearchBox({
   const [loadingBonds, setLoadingBonds] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [ratingLink, setRatingLink] = useState<string | null>(null);
-  const [ratingCusip, setRatingCusip] = useState<string | null>(null);
-  const [cusipCopied, setCusipCopied] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -422,8 +421,6 @@ export function UsBondSearchBox({
     });
     const cusip = !isTreasury && tranche.isin ? cusipFromIsin(tranche.isin) : null;
     setRatingLink(isTreasury ? null : finraBondUrl(cusip));
-    setRatingCusip(cusip);
-    setCusipCopied(false);
 
     const missing: string[] = [];
     if (!tranche.rating) missing.push("신용등급");
@@ -625,20 +622,9 @@ export function UsBondSearchBox({
                 href={ratingLink}
                 target="_blank"
                 rel="noopener noreferrer"
-                onClick={() => {
-                  if (ratingCusip && navigator.clipboard) {
-                    navigator.clipboard
-                      .writeText(ratingCusip)
-                      .then(() => setCusipCopied(true))
-                      .catch(() => {});
-                  }
-                }}
                 className="text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
               >
                 FINRA에서 신용등급 확인
-                {ratingCusip
-                  ? ` (CUSIP ${ratingCusip} 자동 조회${cusipCopied ? ", 복사됨" : ""})`
-                  : ""}
               </a>
             </>
           )}
