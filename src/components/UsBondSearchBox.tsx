@@ -25,6 +25,17 @@ const TREASURY_COMPANY: CompanyInfo = {
 /** FINRA Fixed Income Data — CUSIP/TRACE symbol로 채권을 검색해 신용등급 등 상세정보를 확인할 수 있다 */
 const FINRA_FIXED_INCOME_URL = "https://www.finra.org/finra-data/fixed-income";
 
+/**
+ * FINRA 채권 상세 화면으로 바로 여는 주소. 주소에 CUSIP 을 넣으면 그 채권이 바로 조회된다
+ * (bondType=CA: 회사채·기관채, 2026-10-14 오너 확인). 예전엔 검색 첫 화면만 열고 CUSIP 을
+ * 복사해 두어 직접 붙여 넣어야 했다. CUSIP 이 이상하면 검색 첫 화면.
+ */
+function finraBondUrl(cusip: string | null): string {
+  return cusip && /^[0-9A-Z]{9}$/.test(cusip)
+    ? `${FINRA_FIXED_INCOME_URL}/bond?cusip=${cusip}&bondType=CA`
+    : FINRA_FIXED_INCOME_URL;
+}
+
 interface SecListItem {
   kind: "sec";
   label: string;
@@ -409,8 +420,9 @@ export function UsBondSearchBox({
       callTermsAuto: parsedHasCall,
       redemptionText: tranche.redemptionText,
     });
-    setRatingLink(isTreasury ? null : FINRA_FIXED_INCOME_URL);
-    setRatingCusip(!isTreasury && tranche.isin ? cusipFromIsin(tranche.isin) : null);
+    const cusip = !isTreasury && tranche.isin ? cusipFromIsin(tranche.isin) : null;
+    setRatingLink(isTreasury ? null : finraBondUrl(cusip));
+    setRatingCusip(cusip);
     setCusipCopied(false);
 
     const missing: string[] = [];
@@ -625,7 +637,7 @@ export function UsBondSearchBox({
               >
                 FINRA에서 신용등급 확인
                 {ratingCusip
-                  ? ` (CUSIP ${ratingCusip}${cusipCopied ? " 복사됨" : " 클릭시 복사"})`
+                  ? ` (CUSIP ${ratingCusip} 자동 조회${cusipCopied ? ", 복사됨" : ""})`
                   : ""}
               </a>
             </>
