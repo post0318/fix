@@ -2,11 +2,31 @@ import { getRedis } from "@/lib/server/redis";
 import { COUNTRY_ISSUER_SEC_CIK } from "@/lib/countryIssuerAliases";
 import { addMonths, toDateString } from "@/lib/couponSchedule";
 
-const USER_AGENT = "ChaeGwonSesangBondApp research-contact@chaegwonsesang.example";
+// SEC 공정이용 정책: 실제 이름·연락 이메일을 User-Agent 로 보내야 한다. 예전 값은
+// 존재할 수 없는 예시 도메인(.example)이라 요청이 제한될 수 있었다(2026-10-14 점검).
+const USER_AGENT = process.env.SEC_USER_AGENT || "Hong sungwoo post0318@gmail.com";
 const TICKERS_URL = "https://www.sec.gov/files/company_tickers.json";
 const COMPANY_TTL_MS = 24 * 60 * 60 * 1000;
 const REDIS_KEY = "us-companies-v1";
 const REDIS_TTL_SECONDS = 24 * 60 * 60;
+const BOND_LIST_REDIS_PREFIX = "us-bond-list-v1";
+const BOND_LIST_TTL_SECONDS = 12 * 60 * 60;
+/** 한 목록 조회에서 SEC 로 동시에 보내는 요청 수(SEC 한도 초당 10건) */
+const SEC_CONCURRENCY = 8;
+
+/** items 를 limit 개씩만 동시에 처리하고, 결과는 입력 순서대로 돌려준다 */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
 
 export interface CompanyInfo {
   cik: string;
@@ -19,10 +39,17 @@ export interface CompanyInfo {
 // Redis에도 캐시해 콜드스타트와 무관하게 공유되도록 한다.
 let cachedCompanies: { list: CompanyInfo[]; fetchedAt: number } | null = null;
 
+// SEC 는 공용 IP(Vercel)에서 몰리면 503·429 를 준다 — 잠깐 쉬고 두 번까지 다시 시도
 async function fetchText(url: string): Promise<string> {
-  const res = await fetch(url, { headers: { "user-agent": USER_AGENT } });
-  if (!res.ok) throw new Error(`SEC 요청 실패 (${res.status})`);
-  return res.text();
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, { headers: { "user-agent": USER_AGENT } });
+    if (res.ok) return res.text();
+    if ((res.status === 503 || res.status === 429) && attempt < 2) {
+      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      continue;
+    }
+    throw new Error(`SEC 요청 실패 (${res.status})`);
+  }
 }
 
 /** SEC가 매일 갱신하는 전체 상장/등록 회사 티커·CIK 목록 (약 1MB) */
@@ -100,28 +127,49 @@ export interface FilingSummary {
   indexUrl: string;
 }
 
+/** data.sec.gov submissions JSON 의 공시 목록(열 단위 배열) */
+interface SubmissionColumns {
+  accessionNumber: string[];
+  filingDate: string[];
+  form: string[];
+}
+
+/**
+ * 회사의 공시 중 양식이 type 으로 시작하는 것(FWP, 424B2·424B5 …)을 최신순으로 count 건.
+ * 예전에는 옛 검색 화면(cgi-bin/browse-edgar, Atom)을 썼는데, 조회마다 10초 가까이
+ * 걸리다 503 을 자주 냈다(2026-10-14 실측: Apple FWP 30건 10초 후 503). SEC 가 권장하는
+ * data.sec.gov submissions JSON 으로 바꾼다 — 최근 1,000건은 본 파일에, 그 이전은
+ * filings.files 의 추가 파일에 있어 모자라면 차례로 더 읽는다.
+ */
 async function getFilings(
   cik: string,
   type: string,
   count = 20
 ): Promise<FilingSummary[]> {
-  const url = `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${cik}&type=${type}&dateb=&owner=include&count=${count}&output=atom`;
-  const xml = await fetchText(url);
+  const cikNum = String(Number(cik));
+  const padded = cikNum.padStart(10, "0");
+  const main = JSON.parse(
+    await fetchText(`https://data.sec.gov/submissions/CIK${padded}.json`)
+  ) as { filings?: { recent?: SubmissionColumns; files?: { name: string }[] } };
+
   const entries: FilingSummary[] = [];
-  const entryRe = /<entry>([\s\S]*?)<\/entry>/g;
-  let m: RegExpExecArray | null;
-  while ((m = entryRe.exec(xml))) {
-    const block = m[1];
-    const acc = block.match(/<accession-number>([^<]+)<\/accession-number>/);
-    const href = block.match(/<filing-href>([^<]+)<\/filing-href>/);
-    const filed = block.match(/Filed:(?:&lt;\/b&gt;|<\/b>)?\s*([\d-]+)/);
-    if (acc && href) {
+  const take = (cols: SubmissionColumns | undefined) => {
+    if (!cols) return;
+    for (let i = 0; i < cols.form.length && entries.length < count; i++) {
+      if (!cols.form[i]?.startsWith(type)) continue;
+      const acc = cols.accessionNumber[i];
       entries.push({
-        accessionNumber: acc[1],
-        filedDate: filed ? filed[1] : "",
-        indexUrl: href[1],
+        accessionNumber: acc,
+        filedDate: cols.filingDate[i] ?? "",
+        indexUrl: `https://www.sec.gov/Archives/edgar/data/${cikNum}/${acc.replace(/-/g, "")}/${acc}-index.htm`,
       });
     }
+  };
+  take(main.filings?.recent);
+  // 공시가 많은 회사(은행 등)는 최근 1,000건이 몇 달치뿐이다 — 추가 파일은 3개까지만
+  for (const f of (main.filings?.files ?? []).slice(0, 3)) {
+    if (entries.length >= count) break;
+    take(JSON.parse(await fetchText(`https://data.sec.gov/submissions/${f.name}`)) as SubmissionColumns);
   }
   return entries;
 }
@@ -1043,9 +1091,24 @@ export async function getRecentBondList(
   // 채권도 보여주고 있어 통화와 무관하게 전부 찾아야 하므로 false로 끈다.
   usdOnly = true
 ): Promise<BondListItem[]> {
+  // 같은 회사 목록을 12시간 공유 — 조회 한 번에 SEC 요청이 30건 남짓이라 매번 받으면 느리고 한도에 걸린다
+  const redis = getRedis();
+  const cacheKey = `${BOND_LIST_REDIS_PREFIX}:${cik}:${maxOfferings}:${usdOnly ? "usd" : "all"}`;
+  if (redis) {
+    try {
+      const hit = await redis.get<BondListItem[]>(cacheKey);
+      if (hit) return hit;
+    } catch {
+      // Redis 장애는 무시하고 SEC 에서 받는다
+    }
+  }
   const offerings = (await getFwpFilings(cik)).slice(0, maxOfferings);
-  const results = await Promise.all(
-    offerings.map(async (offering) => {
+  // 한꺼번에 보내면(최대 30건) SEC 초당 10건 한도를 넘어 503 을 받고, 그 오퍼링은 아래 catch 에서
+  // 조용히 빠졌다(2026-10-14 점검). 8건씩만 동시에 보낸다.
+  const results = await mapLimit(
+    offerings,
+    SEC_CONCURRENCY,
+    async (offering) => {
       try {
         const docUrl = await getPrimaryDocUrl(offering.indexUrl);
         if (!docUrl) return [];
@@ -1077,14 +1140,19 @@ export async function getRecentBondList(
       } catch {
         return [];
       }
-    })
+    }
   );
   // FWP 공시 순서(최근 제출일 순)로 섞여 나오면 같은 만기끼리 묶어보기 어렵다.
   // 브라질채권검색/미국국채와 동일하게 만기일 기준 오름차순으로 정렬한다
   // (이 시점에는 위 필터에서 maturityDate가 없는 항목은 이미 걸러졌다).
-  return results
+  const list = results
     .flat()
     .sort((a, b) => (a.maturityDate ?? "") < (b.maturityDate ?? "") ? -1 : 1);
+  // 빈 목록은 일시 장애일 수 있어 저장하지 않는다
+  if (redis && list.length > 0) {
+    await redis.set(cacheKey, list, { ex: BOND_LIST_TTL_SECONDS }).catch(() => {});
+  }
+  return list;
 }
 
 /**
