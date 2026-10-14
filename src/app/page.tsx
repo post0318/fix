@@ -218,7 +218,7 @@ export default function Home() {
           <div className="flex shrink-0 items-center gap-2">
             {/* 프로젝트 5(글로벌 리서치)의 거시경제 화면. 새 탭으로 연다. */}
             <a
-              href="https://macro-insights.duckdns.org/macro"
+              href="https://macro-insights.duckdns.org/macro?embed=top"
               target="_blank"
               rel="noopener noreferrer"
               className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
