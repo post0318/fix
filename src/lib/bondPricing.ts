@@ -119,7 +119,7 @@ export function roundDown(value: number, digits: number): number {
   return Math.trunc(value * factor) / factor;
 }
 
-export function roundUp(value: number, digits: number): number {
+function roundUp(value: number, digits: number): number {
   const factor = Math.pow(10, digits);
   return (Math.sign(value) || 1) * Math.ceil(Math.abs(value) * factor) / factor;
 }
@@ -145,7 +145,7 @@ function accruedInterestFor(
  *  - 2 ACT/360     : E = 360/f, DSC·A = 실제일수
  *  - 3 ACT/365     : E = 365/f, DSC·A = 실제일수
  */
-export function computeCleanPrice(
+function computeCleanPrice(
   settlement: Date,
   maturity: Date,
   annualRate: number,
@@ -438,7 +438,7 @@ function computeStreetCleanPrice(
   return pv - accrued;
 }
 
-export function computeMakeWholePrice(
+function computeMakeWholePrice(
   redemptionDate: Date,
   maturity: Date,
   annualRate: number,

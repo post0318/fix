@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useAppAuth } from "@/components/auth/AppAuth";
 import type { BondLayoutInput } from "@/types/bondLayout";
 
 interface UploadedBondSummary {
@@ -10,7 +9,8 @@ interface UploadedBondSummary {
   maturityDate: string;
   couponRate: string;
   uploadedAt: string;
-  uploadedBy: string;
+  /** 서버가 판정: 지울 수 있는 사람(올린 본인·관리자)에게만 true */
+  canDelete: boolean;
   fields: Partial<BondLayoutInput>;
 }
 
@@ -28,7 +28,6 @@ export function UploadedBondsBox({
   disabled?: boolean;
   onApply: (fields: Partial<BondLayoutInput>) => void;
 }) {
-  const canManage = useAppAuth().allowed === true;
   const [bonds, setBonds] = useState<UploadedBondSummary[]>([]);
   const [selected, setSelected] = useState("");
   const [status, setStatus] = useState<string | null>(null);
@@ -87,7 +86,7 @@ export function UploadedBondsBox({
           </option>
         ))}
       </select>
-      {canManage && selected && (
+      {bonds.find((b) => b.id === selected)?.canDelete && (
         <button
           type="button"
           onClick={() => void remove()}

@@ -10,6 +10,9 @@ export async function GET(request: NextRequest) {
   if (!isin) {
     return NextResponse.json({ error: "isin 파라미터가 필요합니다." }, { status: 400 });
   }
+  if (!/^[A-Za-z0-9]{9,12}$/.test(isin)) {
+    return NextResponse.json({ error: "ISIN 형식이 올바르지 않습니다." }, { status: 400 });
+  }
   try {
     const tranche = await findCallTermsByIsin(isin);
     if (!tranche) {
