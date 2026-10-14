@@ -138,6 +138,12 @@ async function safeJson(res: Response): Promise<unknown> {
   }
 }
 
+class BoerseRequestError extends Error {
+  constructor(readonly status: number) {
+    super(`boerse-frankfurt 요청 실패 (${status})`);
+  }
+}
+
 async function withSaltRetry<T>(
   run: (salt: string) => Promise<{ res: Response; data: T }>,
   label: string,
@@ -152,7 +158,7 @@ async function withSaltRetry<T>(
         ({ res, data } = await run(salt));
       }
       if (!res.ok) {
-        throw new Error(`boerse-frankfurt 요청 실패 (${res.status})`);
+        throw new BoerseRequestError(res.status);
       }
       return data;
     },
@@ -458,7 +464,14 @@ export async function getYieldEstimateByIsin(
   maturityDate: string,
   freqMonths?: number | null
 ): Promise<number | null> {
-  const info = await dataRequest("instrument_information", { isin });
+  // 프랑크푸르트에 상장되지 않은 ISIN(만기 직전 미국채 등)은 400 — 오류가 아니라 시세 없음
+  let info: Record<string, unknown> | null;
+  try {
+    info = await dataRequest("instrument_information", { isin });
+  } catch (error) {
+    if (error instanceof BoerseRequestError && (error.status === 400 || error.status === 404)) return null;
+    throw error;
+  }
   const mics = info?.mics;
   const mic =
     (typeof info?.defaultMic === "string" ? info.defaultMic : undefined) ??
