@@ -1,6 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { UserButton } from "@clerk/nextjs";
+import { useAppAuth } from "@/components/auth/AppAuth";
+import { SignupDialog } from "@/components/auth/SignupDialog";
 import { BondLayoutForm } from "@/components/BondLayoutForm";
 import { CashFlowTable } from "@/components/CashFlowTable";
 import { generateFixCashFlow } from "@/lib/cashFlowSchedule";
@@ -90,12 +93,52 @@ function createInitialLocked(): boolean {
   return decodeBondLink(window.location.search) !== null;
 }
 
+/** 새로고침해도 직전 입력이 남도록 브라우저 탭(sessionStorage)에 보관하는 키. */
+const INPUT_KEY = "bond.input.v1";
+
 export default function Home() {
+  const auth = useAppAuth();
+  const [signupOpen, setSignupOpen] = useState(false);
+  // /?signup=1 (로그인 팝업의 "가입" 링크)로 들어오면 가입 신청 팝업을 연다.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("signup") === "1") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSignupOpen(true);
+    }
+  }, []);
   const [input, setInput] = useState<BondLayoutInput>(createInitialInput);
   const [locked, setLocked] = useState<boolean>(createInitialLocked);
   // 공유 링크로 열린 세션인지 여부(최초 1회 계산 후 고정). locked는 토글 가능하지만
   // 이 값은 바뀌지 않아, 공유 링크로 열었을 때는 잠금 버튼을 계속 비활성화해둔다.
   const [isSharedLink] = useState<boolean>(createInitialLocked);
+
+  // 직전 입력 복원/저장. 공유 링크로 연 세션은 링크 내용이 우선이라 건드리지 않는다.
+  // 복원은 마운트 뒤에 한다(서버 렌더 결과와 어긋나지 않게). 읽을 때는 항상 기본값
+  // 위에 덮어써서, 옛 버전이 남긴 값에 새로 생긴 칸이 없어도 undefined 가 흐르지 않게 한다.
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    if (!isSharedLink) {
+      try {
+        const raw = sessionStorage.getItem(INPUT_KEY);
+        if (raw) {
+          const saved = JSON.parse(raw) as Partial<BondLayoutInput>;
+          // eslint-disable-next-line react-hooks/set-state-in-effect
+          setInput({ ...createDefaultInput(), ...saved });
+        }
+      } catch {
+        // 저장 차단·손상된 값 — 기본값으로 시작
+      }
+    }
+    setRestored(true);
+  }, [isSharedLink]);
+  useEffect(() => {
+    if (isSharedLink || !restored) return;
+    try {
+      sessionStorage.setItem(INPUT_KEY, JSON.stringify(input));
+    } catch {
+      // 저장 실패는 무시 — 기억만 안 될 뿐 화면은 그대로 동작
+    }
+  }, [input, isSharedLink, restored]);
 
   const cashFlowRows = useMemo(
     () =>
@@ -176,20 +219,63 @@ export default function Home() {
           <div className="flex shrink-0 items-center gap-2">
             {/* 프로젝트 5(글로벌 리서치)의 거시경제 화면. 새 탭으로 연다. */}
             <a
-              href="https://5-topaz-five.vercel.app/macro"
+              href="https://macro-insights.duckdns.org/macro"
               target="_blank"
               rel="noopener noreferrer"
               className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               🌐 거시경제
             </a>
-            <button
-              type="button"
-              onClick={() => window.print()}
-              className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              출력
-            </button>
+            {/* 출력은 승인 계정으로 로그인했을 때만(오너 지시) */}
+            {auth.allowed === true && (
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                출력
+              </button>
+            )}
+            {auth.enabled && auth.isSignedIn && (
+              <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                <span className="hidden sm:inline">{auth.email}</span>
+                {/* 아바타 클릭 → 계정 관리·로그아웃. 관리자에겐 「승인 관리」 추가 */}
+                <UserButton>
+                  {auth.isAdmin && (
+                    <UserButton.MenuItems>
+                      <UserButton.Link
+                        label="승인 관리"
+                        href="/admin"
+                        labelIcon={
+                          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                            <path d="M2 8.5l3.5 3.5L14 3.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        }
+                      />
+                    </UserButton.MenuItems>
+                  )}
+                </UserButton>
+              </div>
+            )}
+            {auth.enabled && auth.isLoaded && !auth.isSignedIn && (
+              <div className="flex items-center gap-3 text-sm">
+                <button
+                  type="button"
+                  onClick={auth.openSignIn}
+                  className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  로그인
+                </button>
+                <span className="text-zinc-300 dark:text-zinc-700">|</span>
+                <button
+                  type="button"
+                  onClick={() => setSignupOpen(true)}
+                  className="text-zinc-600 hover:underline dark:text-zinc-400"
+                >
+                  가입 신청
+                </button>
+              </div>
+            )}
           </div>
         </header>
 
@@ -208,6 +294,11 @@ export default function Home() {
           />
         </div>
       </main>
+      <SignupDialog
+        open={signupOpen}
+        onClose={() => setSignupOpen(false)}
+        allowedDomains={auth.allowedDomains}
+      />
     </div>
   );
 }

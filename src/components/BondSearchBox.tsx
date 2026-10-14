@@ -113,7 +113,7 @@ export function BondSearchBox({
       })
       .catch(() => {
         if (!cancelled) {
-          setIssuersError("온라인(Vercel) 배포판에서만 종목검색을 사용할 수 있습니다.");
+          setIssuersError("온라인(Vercel) 배포판에서만 글로벌종목검색을 사용할 수 있습니다.");
         }
       });
     return () => {
@@ -400,7 +400,7 @@ export function BondSearchBox({
         onClick={() => setOpen((v) => !v)}
         className="text-sm font-medium text-blue-600 underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:text-zinc-400 dark:text-blue-400 dark:disabled:text-zinc-600"
       >
-        종목검색
+        글로벌종목검색
       </button>
 
       {active && detailSlug && (

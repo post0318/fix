@@ -42,7 +42,8 @@ import {
 } from "@/lib/yieldCurve";
 import { computeMaturitySummary } from "@/lib/maturitySummary";
 import { parseBondFile } from "@/lib/parseBondFile";
-import { encodeBondLink } from "@/lib/bondLink";
+import { useAppAuth } from "@/components/auth/AppAuth";
+import { UploadedBondsBox } from "@/components/UploadedBondsBox";
 import { BondSearchBox } from "@/components/BondSearchBox";
 import { UsBondSearchBox } from "@/components/UsBondSearchBox";
 import { KoreaBondSearchBox } from "@/components/KoreaBondSearchBox";
@@ -312,8 +313,11 @@ export function BondLayoutForm({
   onLockedChange,
   lockToggleDisabled = false,
 }: BondLayoutFormProps) {
+  // 업로드는 승인 계정으로 로그인했을 때만 보인다(오너 지시).
+  const canUpload = useAppAuth().allowed === true;
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
-  const [linkStatus, setLinkStatus] = useState<string | null>(null);
+  // 업로드 직후 보관함 목록을 다시 불러오게 하는 신호
+  const [bondsRefresh, setBondsRefresh] = useState(0);
   const [activeSearchBox, setActiveSearchBox] = useState<
     "general" | "us" | "kr" | null
   >(null);
@@ -615,6 +619,18 @@ export function BondLayoutForm({
     }
   };
 
+  /** 업로드 파일·보관함에서 읽은 항목을 입력에 반영한다. */
+  const applyUploaded = (parsed: Partial<BondLayoutInput>) => {
+    // 만기일이 새로 들어왔으면 이전 종목의 신탁만기일 override·콜조항을 초기화.
+    const merged =
+      parsed.maturityDate !== undefined
+        ? { ...value, ...clearedCallFields(parsed), ...parsed }
+        : { ...value, ...parsed };
+    onChange(merged);
+    setDisclosureRating(false);
+    setAutoTermsNote(null);
+  };
+
   const handleUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -628,28 +644,26 @@ export function BondLayoutForm({
         setUploadStatus("일치하는 항목을 찾지 못했습니다.");
         return;
       }
-      // 만기일이 새로 들어왔으면 이전 종목의 신탁만기일 override·콜조항을 초기화.
-      const merged =
-        parsed.maturityDate !== undefined
-          ? { ...value, ...clearedCallFields(parsed), ...parsed }
-          : { ...value, ...parsed };
-      onChange(merged);
-      onLockedChange(true);
-      setDisclosureRating(false);
-      setAutoTermsNote(null);
-      setUploadStatus(`${count}개 항목을 반영했습니다.`);
+      applyUploaded(parsed);
+      // 올린 채권은 보관함(DB)에 두어 조회 가능한 모든 사람이 쓴다.
+      let saveNote = "";
+      try {
+        const res = await fetch("/api/uploaded-bonds", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ fields: parsed }),
+        });
+        if (res.ok) setBondsRefresh((n) => n + 1);
+        else {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          saveNote = ` (보관함 저장 실패: ${data.error ?? res.status})`;
+        }
+      } catch {
+        saveNote = " (보관함 저장 실패)";
+      }
+      setUploadStatus(`${count}개 항목을 반영했습니다.${saveNote}`);
     } catch {
       setUploadStatus("파일을 읽는 중 오류가 발생했습니다.");
-    }
-  };
-
-  const handleCreateLink = async () => {
-    const link = encodeBondLink(value);
-    try {
-      await navigator.clipboard.writeText(link);
-      setLinkStatus("링크를 클립보드에 복사했습니다.");
-    } catch {
-      setLinkStatus(link);
     }
   };
 
@@ -697,6 +711,15 @@ export function BondLayoutForm({
               );
             }
             onChange((prev) => applyFieldsWithCurrencySync(prev, fields));
+          }}
+        />
+        <UploadedBondsBox
+          refreshKey={bondsRefresh}
+          disabled={lockToggleDisabled}
+          onApply={(fields) => {
+            setActiveSearchBox(null);
+            setCallNotice(null);
+            applyUploaded(fields);
           }}
         />
         <KoreaBondSearchBox
@@ -839,37 +862,20 @@ export function BondLayoutForm({
           </Row>
         </div>
         <div className="flex flex-wrap items-center gap-2 print:hidden">
-          <label className="inline-flex w-fit cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800">
-            업로드
-            <input
-              type="file"
-              accept=".xlsx,.xls"
-              className="hidden"
-              onChange={handleUpload}
-            />
-          </label>
-          <button
-            type="button"
-            onClick={handleCreateLink}
-            className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            링크 생성
-          </button>
-          <button
-            type="button"
-            disabled={lockToggleDisabled}
-            onClick={() => onLockedChange(!locked)}
-            className={
-              locked
-                ? "inline-flex w-fit items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-400 dark:disabled:hover:bg-amber-950/40"
-                : "inline-flex w-fit items-center gap-1 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-white dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:disabled:hover:bg-zinc-900"
-            }
-          >
-            {locked ? "🔒 정보잠김" : "🔓 정보잠금"}
-          </button>
-          {(uploadStatus || linkStatus) && (
+          {canUpload && (
+            <label className="inline-flex w-fit cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800">
+              업로드
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                onChange={handleUpload}
+              />
+            </label>
+          )}
+          {uploadStatus && (
             <p className="ml-2 whitespace-nowrap text-xs text-zinc-500 dark:text-zinc-400">
-              {uploadStatus || linkStatus}
+              {uploadStatus}
             </p>
           )}
         </div>
@@ -1133,9 +1139,11 @@ export function BondLayoutForm({
                 <div
                   // 이 공란만은 카드 폭 안에서 줄바꿈해 전문을 보여준다(사용자
                   // 지시 "줄바꿈"). 다른 행의 줄바꿈 금지 규칙과는 별개.
-                  className={`${blankCellClass} min-w-0 items-start whitespace-normal break-words print:hidden`}
+                  // blankCellClass 는 whitespace-nowrap 이라 whitespace-normal 과
+                  // 같이 쓰면 CSS 순서에 따라 nowrap 이 이겨 화면을 넘는다 → 쓰지 않는다.
+                  className="flex min-w-0 items-start whitespace-normal break-words border border-white bg-white px-3 py-2 text-sm dark:border-zinc-950 dark:bg-zinc-950 print:hidden"
                 >
-                  <span className="text-xs text-amber-700 dark:text-amber-400">
+                  <span className="min-w-0 break-words text-xs text-amber-700 dark:text-amber-400">
                     <span className="mr-1 rounded border border-amber-400 px-1 text-[10px] font-semibold">
                       추정
                     </span>
