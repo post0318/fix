@@ -958,6 +958,8 @@ export function BondLayoutForm({
               className={inputClass}
               type="date"
               value={
+                // 지난 수기 이표일은 계산에 실제 쓰는(넘긴) 날짜를 보여준다.
+                (pricing?.recentCouponAdjustedFrom ? pricing.recentCouponDate : "") ||
                 value.recentCouponDate ||
                 getRecentCouponDate(
                   value.maturityDate,
@@ -978,6 +980,16 @@ export function BondLayoutForm({
               onKeyDown={commitOnEnter}
             />
           </Row>
+          {pricing?.recentCouponAdjustedFrom && (
+            <div
+              className={`${blankCellClass} min-w-0 items-start whitespace-normal break-words print:hidden`}
+            >
+              <span className="text-xs text-amber-700 dark:text-amber-400">
+                입력된 최근이표일 {pricing.recentCouponAdjustedFrom}이 지나
+                결제일 직전 이표일 {pricing.recentCouponDate}로 계산했습니다.
+              </span>
+            </div>
+          )}
           <Row label="날짜계산 기준" editable>
             <select
               className={`${inputClass} print:hidden`}

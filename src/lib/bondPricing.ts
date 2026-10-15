@@ -269,6 +269,8 @@ export interface BondPricingInputs {
 export interface BondPricingResult {
   settlementDate: string;
   recentCouponDate: string;
+  /** 수기 최근이표일이 지나 결제일 직전 이표일로 넘겼으면 원래 입력값, 아니면 null */
+  recentCouponAdjustedFrom: string | null;
   accrualFraction: number;
   cleanPrice: number;
   dirtyPrice: number;
@@ -313,9 +315,27 @@ export function computeBondPricing(
   const redemptionBasis = input.tradeCurrency === "KRW" ? 10000 : 100;
 
   const period = getCouponPeriod(maturity, input.couponFrequency, settlement);
-  const recentCoupon = input.recentCouponDate
+  // 수기(업로드·링크) 최근이표일이 결제일보다 한 주기 이상 지났으면(파일에 옛
+  // 이표일이 남은 경우) 그 날짜의 이표 주기를 따라 결제일 직전 이표일까지
+  // 넘긴다. 그대로 쓰면 경과이자가 한 주기를 넘어 첫 회차 과세소득이 음수가
+  // 되고, 이미 지급된 이표가 현금흐름표에 들어간다(사용자 결정 2026-10-15 "가").
+  // 수기 날짜를 기준으로 k주기씩 더해(연쇄 가산 아님) 월말 드리프트를 막는다.
+  const manualRecent = input.recentCouponDate
     ? new Date(input.recentCouponDate)
-    : period.previousCouponDate;
+    : null;
+  let recentCoupon = manualRecent ?? period.previousCouponDate;
+  let recentCouponAdjustedFrom: string | null = null;
+  if (manualRecent && !Number.isNaN(manualRecent.getTime())) {
+    const months = FREQUENCY_MONTHS[input.couponFrequency];
+    for (let k = 1; k <= 2400; k++) {
+      const next = addMonths(manualRecent, months * k);
+      if (next.getTime() > settlement.getTime()) break;
+      recentCoupon = next;
+    }
+    if (recentCoupon !== manualRecent) {
+      recentCouponAdjustedFrom = manualRecent.toISOString().slice(0, 10);
+    }
+  }
 
   const basis = BASIS_INDEX[input.calcBasis];
   // 경과분율은 basis별로 computeCleanPrice의 내부 경과분(coupon·a/e)과 같은
@@ -378,6 +398,7 @@ export function computeBondPricing(
   return {
     settlementDate: settlement.toISOString().slice(0, 10),
     recentCouponDate: recentCoupon.toISOString().slice(0, 10),
+    recentCouponAdjustedFrom,
     accrualFraction: accrualFrac,
     cleanPrice,
     dirtyPrice,
